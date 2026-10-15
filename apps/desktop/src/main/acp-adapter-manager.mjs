@@ -6,6 +6,7 @@ import { once } from "node:events";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { finished } from "node:stream/promises";
+import { setTimeout as delay } from "node:timers/promises";
 import { Readable } from "node:stream";
 import { Unzip, UnzipInflate } from "fflate";
 
@@ -23,6 +24,24 @@ const SUPPORTED_MAJOR = { codex: 2, claudeCode: 0, antigravity: 1 };
 const NPM_PACKAGES = { codex: "@agentclientprotocol/codex-acp", claudeCode: "@agentclientprotocol/claude-agent-acp", piAgent: "pi-acp" };
 const MANAGED_IDS = ["codex", "claudeCode", "antigravity", "piAgent"];
 const npmEntryFile = (root, id) => path.join(root, "node_modules", ...NPM_PACKAGES[id].split("/"), "dist", "index.js");
+export const npmAdapterCommand = (file, id, executablePath) => ({
+  command: executablePath,
+  args: id === "claudeCode" ? ["--import", new URL("./claude-acp-compat.mjs", import.meta.url).href, file] : [file],
+  env: { ELECTRON_RUN_AS_NODE: "1" },
+});
+
+// Windows can retain executable/scanner handles briefly even after process exit.
+// Keep the same atomic rename, with a finite retry window; do not copy over the
+// active version or change the manifest before the staged directory is ready.
+export async function renameAdapterPath(source, destination, { platform = process.platform, renameImpl = rename, wait = delay } = {}) {
+  for (let attempt = 0; ; attempt += 1) {
+    try { return await renameImpl(source, destination); }
+    catch (error) {
+      if (platform !== "win32" || !["EBUSY", "EPERM", "EACCES"].includes(error?.code) || attempt >= 10) throw error;
+      await wait(200 * (attempt + 1));
+    }
+  }
+}
 
 const platformTarget = (platform, arch) => {
   const system = { darwin: "darwin", linux: "linux", win32: "windows" }[platform];
@@ -48,7 +67,7 @@ export const managedAdapterCommand = (root, id, version, { platform = process.pl
   const file = commandFile(root, id, version, platform);
   if (!existsSync(file)) return null;
   return id !== "antigravity"
-    ? { command: executablePath, args: [file], env: { ELECTRON_RUN_AS_NODE: "1" } }
+    ? npmAdapterCommand(file, id, executablePath)
     : { command: file, args: antigravityArgs(platform) };
 };
 
@@ -215,7 +234,7 @@ export function createAcpAdapterManager({ root, fetchImpl = fetch, platform = pr
       const temporary = `${manifestPath}.${process.pid}.tmp`;
       const file = await open(temporary, "w", 0o600);
       try { await file.writeFile(JSON.stringify(next)); } finally { await file.close(); }
-      await rename(temporary, manifestPath);
+      await renameAdapterPath(temporary, manifestPath, { platform });
       state = next;
     });
     saveQueue = write.catch(() => {});
@@ -257,7 +276,7 @@ export function createAcpAdapterManager({ root, fetchImpl = fetch, platform = pr
             : path.join(stage, platform === "win32" ? "agy_acp_server.exe" : "agy_acp_server.par");
           if (!existsSync(stagedFile)) throw new Error("adapter_install_failed");
           const stagedCommand = release.kind === "npm"
-            ? { command: executablePath, args: [stagedFile], env: { ELECTRON_RUN_AS_NODE: "1" } }
+            ? npmAdapterCommand(stagedFile, id, executablePath)
             : { command: stagedFile, args: antigravityArgs(platform) };
           updateStage = "validate";
           const result = await validate(stagedCommand);
@@ -268,12 +287,14 @@ export function createAcpAdapterManager({ root, fetchImpl = fetch, platform = pr
             throw new Error(result?.detail || result?.state || "adapter_probe_failed");
           }
           updateStage = "activate";
-          await rm(target, { recursive: true, force: true });
-          await rename(stage, target);
+          await rm(target, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+          await renameAdapterPath(stage, target, { platform });
           await save(id, release.version);
           return { updated: true, version: release.version, adapter: result };
         } catch (error) {
-          await rm(stage, { recursive: true, force: true });
+          // A locked staging directory must not hide the validation/activation
+          // failure. prune() can remove the abandoned stage on the next launch.
+          await rm(stage, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }).catch(() => {});
           throw error;
         }
       } catch (error) {

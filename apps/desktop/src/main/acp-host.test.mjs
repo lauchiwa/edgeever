@@ -327,7 +327,9 @@ describe("ACP command allow-list", () => {
       const deps = { platform: "darwin", pathEnv: bin, home: directory, executablePath: "/usr/bin/node" };
       expect(resolveAcpCommand({ id: "deepseekHarness" }, deps).command).toEqual({ command: realpathSync(dsh), args: ["--profile", "acp"] });
       expect(resolveAcpCommand({ id: "piAgent" }, deps).command).toEqual({ command: realpathSync(piAcp), args: [] });
-      expect(detectInstalledAgentApps({ platform: "darwin", pathEnv: bin, home: directory })).toContain("piAgent");
+      expect(detectInstalledAgentApps({ platform: "darwin", pathEnv: "/fixture-bin", home: directory,
+        access: (candidate) => { realpathSync(path.join(bin, path.posix.basename(candidate))); },
+      })).toContain("piAgent");
       const localBin = path.join(directory, ".local", "bin");
       await mkdir(localBin, { recursive: true });
       await writeFile(path.join(localBin, "pi"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
@@ -679,7 +681,9 @@ describe("ACP spawn and failure mapping", () => {
 // (the bytes never arrive). The same processes work when cwd is apps/desktop,
 // which is how `bun run test:desktop` runs this file.
 const stdioPipesWork = await (async () => {
-  const proc = Bun.spawn(["/bin/echo", "ok"], { stdout: "pipe", stderr: "ignore" });
+  let proc;
+  try { proc = Bun.spawn(["/bin/echo", "ok"], { stdout: "pipe", stderr: "ignore" }); }
+  catch { return false; } // These legacy session fixtures require POSIX shell scripts; Windows has separate native-process tests.
   const text = await new Response(proc.stdout).text();
   await proc.exited;
   return text.includes("ok");
