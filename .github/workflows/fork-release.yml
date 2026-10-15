@@ -68,11 +68,7 @@ jobs:
             Start-Sleep -Seconds (15 * $attempt)
           }
 
-      # main keeps the bare upstream version; the release version comes from the tag.
-      - name: Apply the release version
-        shell: bash
-        run: node scripts/fork-release-version.mjs apply "${TAG}"
-
+      # Gates check the reviewed source exactly as tagged, before anything is rewritten.
       - name: Release gates
         shell: bash
         env:
@@ -84,6 +80,11 @@ jobs:
           bun test --cwd apps/desktop src/main/acp-host-native.test.mjs src/main/acp-windows-command.test.mjs \
             src/main/acp-process-lifecycle.test.mjs src/main/claude-acp-compat.test.mjs
           bun run typecheck
+
+      # main keeps the bare upstream version; the release version comes from the tag.
+      - name: Apply the release version
+        shell: bash
+        run: node scripts/fork-release-version.mjs apply "${TAG}"
 
       - name: Build Web renderer
         env:
