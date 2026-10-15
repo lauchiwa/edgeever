@@ -32,6 +32,13 @@ const AUTH_REQUIRED_CODE = -32000;
 const MAX_ATTACHMENTS = 8;
 const MAX_ATTACHMENT_CHARS = 8_000_000;
 const HANDSHAKE_TIMEOUT_MS = 20_000;
+// Claude Code's SDK initialization alone takes ~14 s on Windows (measured on
+// claude-agent-acp 0.90.0), so the shared 20 s budget fails its first
+// connection intermittently. A hung adapter still fails, just later.
+const ADAPTER_HANDSHAKE_TIMEOUT_MS = { claudeCode: 60_000 };
+
+// An explicit option (tests, callers) wins over the per-adapter default.
+export const handshakeTimeoutFor = (id, override) => override ?? ADAPTER_HANDSHAKE_TIMEOUT_MS[id] ?? HANDSHAKE_TIMEOUT_MS;
 const WORKSPACE_MARKER = `${path.sep}edgeever-acp-`;
 const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
 
@@ -733,7 +740,7 @@ export function createAcpHostRuntime(options = {}) {
     }
   };
   const version = options.clientVersion ?? clientVersion();
-  const handshakeTimeoutMs = options.handshakeTimeoutMs ?? HANDSHAKE_TIMEOUT_MS;
+  const adapterTimeout = (id) => handshakeTimeoutFor(id, options.handshakeTimeoutMs);
   const authenticationTimeoutMs = options.authenticationTimeoutMs ?? 5 * 60_000;
   const commandDeps = options;
   const manager = options.adapterManager ?? (options.adapterStore ? createAcpAdapterManager({ root: options.adapterStore, executablePath: options.executablePath, fetchImpl: options.adapterFetchImpl }) : null);
@@ -884,7 +891,7 @@ export function createAcpHostRuntime(options = {}) {
     }
   };
 
-  const withHandshakeTimeout = async (operation, timeoutMs = handshakeTimeoutMs) => {
+  const withHandshakeTimeout = async (operation, timeoutMs) => {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     timer.unref?.();
@@ -989,7 +996,7 @@ export function createAcpHostRuntime(options = {}) {
       if (!resolved.ok) return adapterFromResolution(id, resolved);
       let connected;
       try {
-        connected = await withHandshakeTimeout((signal) => connect(resolved.command, `probe-${id}`, () => {}, signal, undefined, [], false, null, id === "workbuddyCn" || id === "workbuddyIntl"));
+        connected = await withHandshakeTimeout((signal) => connect(resolved.command, `probe-${id}`, () => {}, signal, undefined, [], false, null, id === "workbuddyCn" || id === "workbuddyIntl"), adapterTimeout(id));
       } catch (error) {
         const failure = { ...adapterShell(id), ...failureFields(classifyAcpFailure(error)), ...(error.authMethods?.length ? { authMethods: error.authMethods } : {}), ...(resolved.version ? { version: resolved.version, managed: true } : {}) };
         latestStatus.set(id, failure);
@@ -1025,7 +1032,7 @@ export function createAcpHostRuntime(options = {}) {
           await removeAcpWorkspace(connected.cwd, rmImpl);
           connected = null;
           // Login is useful only if a fresh chat process can restore credentials.
-          connected = await withHandshakeTimeout((signal) => connect(resolved.command, `auth-check-${id}`, () => {}, signal, undefined, [], false, null, true));
+          connected = await withHandshakeTimeout((signal) => connect(resolved.command, `auth-check-${id}`, () => {}, signal, undefined, [], false, null, true), adapterTimeout(id));
         }
         const adapter = { ...adapterShell(id), state: "available", promptCapabilities: connected.promptCapabilities, authMethods: connected.authMethods, ...(resolved.version ? { version: resolved.version, managed: true } : {}) };
         latestStatus.set(id, adapter);
@@ -1081,7 +1088,7 @@ export function createAcpHostRuntime(options = {}) {
         connected = await withHandshakeTimeout((signal) => connect(
           resolved.command, requestId, notify, signal, undefined,
           mcpBridge ? [mcpServerFor(mcpBridge)] : [], true, null, input.adapterId === "workbuddyCn" || input.adapterId === "workbuddyIntl",
-        ));
+        ), adapterTimeout(input.adapterId));
         rememberPromptStatus({
           state: "available",
           authMethods: connected.authMethods,
