@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { CLAUDE_AUTH_STATUS_SHA256, patchClaudeAuthStatus } from "./claude-acp-compat.mjs";
+import { CLAUDE_AUTH_STATUS_SHA256, CLAUDE_COMPAT_VERSIONS, patchClaudeAuthStatus } from "./claude-acp-compat.mjs";
 
 // Small source fixture for the same published CLI-mapping branch. The opt-in
 // Windows verifier also exercises the hash-gated transform on the real package.
@@ -50,4 +50,9 @@ test("never patches unknown artifact hashes or an already modified file", () => 
   expect(patchClaudeAuthStatus(`${source}\n`, hash)).toBe(`${source}\n`);
   expect(patchClaudeAuthStatus(patched, hash)).toBe(patched);
   expect(patchClaudeAuthStatus(Buffer.from(source), hash)).toBe(patched);
+});
+
+test("applies only to published versions verified to ship the hashed auth-status.js", () => {
+  // 0.90.0 and 0.91.0 ship a byte-identical dist/auth-status.js (SHA-256 above).
+  expect([...CLAUDE_COMPAT_VERSIONS]).toEqual(["0.90.0", "0.91.0"]);
 });

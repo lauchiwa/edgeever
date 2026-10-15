@@ -1685,6 +1685,7 @@ export const zhCN = {
       localLoginRequired: "本地 Agent 需要登录。请在“设置 → 模型与代理”中完成登录后重试。",
       workbuddyLoginRequired: "WorkBuddy ACP 未能使用已有登录。请在“设置 → 模型与代理”中选择 ACP 登录方式，完成后重试。",
       agentRefused: "本地 Agent 拒绝了这次请求。请检查代理的登录状态或模型配置后重试。",
+      agentEmptyReply: "本地 Agent 返回了空回复，通常是其模型服务出错或回复被截断。请检查代理的模型配置后重试。",
       unavailable: "需要登录个人账户后才能发送。演示模式或未登录时不能使用内置助手。",
       proposalConfirm: "应用到笔记",
       proposalReject: "不采用",

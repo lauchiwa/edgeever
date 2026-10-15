@@ -37,6 +37,12 @@ const HANDSHAKE_TIMEOUT_MS = 20_000;
 // connection intermittently. A hung adapter still fails, just later.
 const ADAPTER_HANDSHAKE_TIMEOUT_MS = { claudeCode: 60_000 };
 
+// pi-acp (0.0.34 and earlier) accepts session/new mcpServers but never passes
+// them to pi, so the session-scoped EdgeEver bridge is unreachable there.
+// Remove the entry once the adapter forwards session MCP servers.
+const ADAPTERS_WITHOUT_SESSION_MCP = new Set(["piAgent"]);
+const NO_SESSION_MCP_GUIDANCE = "EdgeEver note tools are not available in this conversation: this agent's ACP adapter does not connect the session-provided EdgeEver MCP server. Do not use any EdgeEver MCP server from your persistent configuration; it may target a different instance or account. Work only from the context included in this message. If the request requires reading, creating or changing EdgeEver notes beyond that context, say clearly that note access is unavailable for this agent and suggest using Codex or Claude Code instead. Do not try workarounds such as fetching web pages or calling EdgeEver APIs directly.";
+
 // An explicit option (tests, callers) wins over the per-adapter default.
 export const handshakeTimeoutFor = (id, override) => override ?? ADAPTER_HANDSHAKE_TIMEOUT_MS[id] ?? HANDSHAKE_TIMEOUT_MS;
 const WORKSPACE_MARKER = `${path.sep}edgeever-acp-`;
@@ -711,7 +717,13 @@ const promptFailureMessage = (failure) => {
   return failure.detail || "connection_failed";
 };
 
-export function promptResultFailure(result) {
+// A finished turn that never streamed visible output means the model returned
+// an empty or truncated reply (some adapters, such as pi-acp, report those as
+// end_turn). Surface it instead of completing silently with nothing.
+const EMPTY_REPLY_STOP_REASONS = new Set(["end_turn", "max_tokens", "max_turn_requests"]);
+
+export function promptResultFailure(result, { producedOutput = true } = {}) {
+  if (!producedOutput && EMPTY_REPLY_STOP_REASONS.has(result?.stopReason)) return "agent_empty_reply";
   if (result?.stopReason !== "refusal") return null;
   const rawError = result?._meta?.["codebuddy.ai/errorMessage"];
   if (typeof rawError === "string" && rawError.length <= 4_096) {
@@ -1059,7 +1071,11 @@ export function createAcpHostRuntime(options = {}) {
       if (!input || typeof input !== "object" || typeof input.prompt !== "string") throw new Error("invalid_prompt");
       if (!Object.hasOwn(ADAPTERS, input.adapterId)) throw new Error("unknown_adapter");
       const requestId = randomUUID();
-      const notify = (event) => emit(event);
+      let producedOutput = false;
+      const notify = (event) => {
+        if (event?.type === "text-delta" || event?.type === "image") producedOutput = true;
+        emit(event);
+      };
       const fail = (message) => {
         notify({ requestId, type: "error", message });
         return { requestId };
@@ -1076,8 +1092,10 @@ export function createAcpHostRuntime(options = {}) {
       let connected;
       let mcpBridge;
       try {
-        // OpenClaw's ACP Gateway bridge rejects session-scoped MCP servers.
-        if (options.mcpAccess && input.noteAccess !== false && input.adapterId !== "openClaw") {
+        // OpenClaw's ACP Gateway bridge rejects session-scoped MCP servers, and
+        // some adapters accept but never connect them; neither gets note access.
+        if (options.mcpAccess && input.noteAccess !== false && input.adapterId !== "openClaw"
+          && !ADAPTERS_WITHOUT_SESSION_MCP.has(input.adapterId)) {
           const access = await options.mcpAccess();
           mcpBridge = await (options.startMcpBridge ?? startAcpMcpBridge)(access);
         }
@@ -1114,6 +1132,9 @@ export function createAcpHostRuntime(options = {}) {
           // Codex derives its thread title from the start of the first user turn.
           promptFirst: input.adapterId === "codex",
         });
+        if (!mcpBridge && input.noteAccess !== false && ADAPTERS_WITHOUT_SESSION_MCP.has(input.adapterId)) {
+          content.blocks.unshift({ type: "text", text: NO_SESSION_MCP_GUIDANCE });
+        }
         if (mcpBridge) {
           content.blocks.splice(input.adapterId === "codex" ? 1 : 0, 0, {
             type: "text",
@@ -1145,7 +1166,7 @@ export function createAcpHostRuntime(options = {}) {
       };
       void connected.connection.prompt({ sessionId: connected.sessionId, prompt: content.blocks }).then((result) => {
         if (session.cancelled) return finish({ requestId, type: "done" });
-        const failure = connected.authenticationRequired() ? "needs_login" : promptResultFailure(result);
+        const failure = connected.authenticationRequired() ? "needs_login" : promptResultFailure(result, { producedOutput });
         if (failure === "needs_login") {
           rememberPromptStatus({ state: "needs_login", authMethods: connected.authMethods });
         }

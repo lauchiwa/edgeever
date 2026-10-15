@@ -32,6 +32,12 @@ const encode = (value) => Buffer.from(value).toString("base64");
 
 test("classifies ACP prompt refusals without exposing vendor error details", () => {
   expect(promptResultFailure({ stopReason: "end_turn" })).toBeNull();
+  expect(promptResultFailure({ stopReason: "end_turn" }, { producedOutput: true })).toBeNull();
+  expect(promptResultFailure({ stopReason: "end_turn" }, { producedOutput: false })).toBe("agent_empty_reply");
+  expect(promptResultFailure({ stopReason: "max_tokens" }, { producedOutput: false })).toBe("agent_empty_reply");
+  expect(promptResultFailure({ stopReason: "max_tokens" }, { producedOutput: true })).toBeNull();
+  expect(promptResultFailure({ stopReason: "cancelled" }, { producedOutput: false })).toBeNull();
+  expect(promptResultFailure({ stopReason: "refusal" }, { producedOutput: false })).toBe("agent_refused");
   expect(promptResultFailure({ stopReason: "refusal" })).toBe("agent_refused");
   expect(promptResultFailure({ stopReason: "refusal", _meta: { "codebuddy.ai/errorMessage": "not-json" } })).toBe("agent_refused");
   expect(promptResultFailure({ stopReason: "refusal", _meta: { "codebuddy.ai/errorMessage": JSON.stringify({ data: { category: "auth" }, message: "private detail" }) } })).toBe("needs_login");
@@ -84,7 +90,7 @@ const collector = () => {
   };
 };
 
-const fakeAgentSource = ({ reportPath, secretPath, allowImage, allowEmbedded, hold, requireAuth, advertiseAuth, promptRefusal, hangAuth, hangSession, failSessionBeforeLogin, workBuddyAccountApi, workBuddyLoginFailure, workBuddyUnreadable, workBuddyUnreadableAfterLogin, authMethodId = "browser", authStatusKind, advertiseAuthStatus = false, authStatusDelay = 20, stderrText, promptAuthStatusKind }) => `#!/usr/bin/env bun
+const fakeAgentSource = ({ reportPath, secretPath, allowImage, allowEmbedded, hold, requireAuth, advertiseAuth, promptRefusal, hangAuth, hangSession, failSessionBeforeLogin, workBuddyAccountApi, workBuddyLoginFailure, workBuddyUnreadable, workBuddyUnreadableAfterLogin, authMethodId = "browser", authStatusKind, advertiseAuthStatus = false, authStatusDelay = 20, stderrText, promptAuthStatusKind, emptyReply }) => `#!/usr/bin/env bun
 import * as acp from ${JSON.stringify(sdkHref)};
 import { writeFileSync, readFileSync } from "node:fs";
 
@@ -207,6 +213,13 @@ acp.agent({ name: "edgeever-fake-agent" })
     report.prompt = ctx.params.prompt;
     save();
     if (promptRefusal) return promptRefusal;
+    if (${emptyReply ? "true" : "false"}) {
+      await ctx.client.notify("session/update", {
+        sessionId: ctx.params.sessionId,
+        update: { sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "thinking" } },
+      });
+      return { stopReason: ${JSON.stringify(emptyReply ?? "end_turn")} };
+    }
     await ctx.client.notify("session/update", {
       sessionId: ctx.params.sessionId,
       update: { sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "thinking" } },
@@ -1201,6 +1214,73 @@ describe("ACP stdio session", () => {
       const probed = await runtime.probeAdapter({ id: "antigravity", path: scriptPath });
       expect(probed.state).toBe("available");
       expect(probed.authMethods).toEqual([{ id: "browser", name: "Browser" }]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 15_000);
+
+  sessionTest("reports a finished turn without visible output as an empty reply", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "edgeever-acp-empty-"));
+    try {
+      for (const stopReason of ["end_turn", "max_tokens"]) {
+        const scriptPath = await writeFakeAgent(directory, {
+          reportPath: path.join(directory, "report.json"),
+          secretPath: path.join(directory, "secret.txt"),
+          allowImage: false,
+          allowEmbedded: false,
+          hold: false,
+          emptyReply: stopReason,
+        });
+        const runtime = createAcpHostRuntime();
+        const events = collector();
+        const result = await runtime.prompt({ adapterId: "antigravity", path: scriptPath, prompt: "Hello", noteAccess: false }, events.emit);
+        expect(await events.waitFor((event) => event.type === "error")).toEqual({ requestId: result.requestId, type: "error", message: "agent_empty_reply" });
+        expect(events.events.some((event) => event.type === "reasoning")).toBe(true);
+        expect(events.events.some((event) => event.type === "done")).toBe(false);
+      }
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 15_000);
+
+  sessionTest("does not offer the session MCP bridge to pi, whose adapter never connects it", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "edgeever-acp-pi-mcp-"));
+    const reportPath = path.join(directory, "report.json");
+    try {
+      const scriptPath = await writeFakeAgent(directory, {
+        reportPath,
+        secretPath: path.join(directory, "secret.txt"),
+        allowImage: false,
+        allowEmbedded: false,
+        hold: false,
+      });
+      const pi = path.join(directory, process.platform === "win32" ? "pi.exe" : "pi");
+      await writeFile(pi, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+      let bridgeStarted = false;
+      const runtime = createAcpHostRuntime({
+        pathEnv: directory,
+        home: directory,
+        adapterManager: { get: (id) => id === "piAgent" ? { version: "test", command: { command: scriptPath, args: [] } } : null },
+        mcpAccess: () => ({ baseUrl: "https://notes.example", sessionToken: "login-secret" }),
+        startMcpBridge: () => {
+          bridgeStarted = true;
+          return { url: "http://127.0.0.1:12345", secret: "temporary-secret", close: async () => {} };
+        },
+      });
+      const events = collector();
+      await runtime.prompt({ adapterId: "piAgent", prompt: "List my notes" }, events.emit);
+      await events.waitFor((event) => event.type === "done");
+      const report = await readReport(reportPath);
+      expect(bridgeStarted).toBe(false);
+      expect(report.newSession.mcpServers).toEqual([]);
+      expect(report.prompt[0].text).toContain("EdgeEver note tools are not available");
+      expect(report.prompt[0].text).not.toContain("use only the session-provided MCP server");
+      expect(report.prompt.at(-1)).toEqual({ type: "text", text: "List my notes" });
+
+      const readOnly = collector();
+      await runtime.prompt({ adapterId: "piAgent", prompt: "Summarize", noteAccess: false }, readOnly.emit);
+      await readOnly.waitFor((event) => event.type === "done");
+      expect(JSON.stringify((await readReport(reportPath)).prompt)).not.toContain("EdgeEver note tools");
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
