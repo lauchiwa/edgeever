@@ -4,7 +4,7 @@ import { createUpdateDiagnostic } from "./update-diagnostics.mjs";
 const context = { stage: "check", version: "1.107.0", platform: "win32", arch: "x64", now: new Date("2026-10-10T14:00:00Z") };
 
 test("preserves actionable network errors and UTC context", () => {
-  const result = createUpdateDiagnostic(new Error("net::ERR_CONNECTION_TIMED_OUT at https://github.com/tianma-if/edgeever/releases.atom"), context);
+  const result = createUpdateDiagnostic(new Error("net::ERR_CONNECTION_TIMED_OUT at https://github.com/lauchiwa/edgeever/releases.atom"), context);
   expect(result.code).toBe("ERR_CONNECTION_TIMED_OUT");
   expect(result.message).toContain("releases.atom");
   expect(result.at).toBe("2026-10-10T14:00:00.000Z");

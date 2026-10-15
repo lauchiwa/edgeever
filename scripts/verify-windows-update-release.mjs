@@ -3,18 +3,20 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   WINDOWS_UPDATE_MANIFEST_NAME,
+  WINDOWS_UPDATE_PUBLIC_KEYS,
   WINDOWS_UPDATE_SIGNATURE_NAME,
   verifyDownloadedWindowsUpdate,
   verifyWindowsUpdateMetadata,
 } from "../apps/desktop/src/main/windows-update-trust.mjs";
+import { WINDOWS_UPDATE_CHANNEL_FILE } from "./create-windows-update-metadata.mjs";
 
-export const verifyWindowsUpdateRelease = async (directory) => {
+export const verifyWindowsUpdateRelease = async (directory, { trustedPublicKeys = WINDOWS_UPDATE_PUBLIC_KEYS } = {}) => {
   const manifestBytes = readFileSync(join(directory, WINDOWS_UPDATE_MANIFEST_NAME));
   const signatureBytes = readFileSync(join(directory, WINDOWS_UPDATE_SIGNATURE_NAME));
   const untrustedManifest = JSON.parse(manifestBytes.toString("utf8"));
   const expectedNames = [
     untrustedManifest.file?.name,
-    "latest.yml",
+    WINDOWS_UPDATE_CHANNEL_FILE,
     WINDOWS_UPDATE_MANIFEST_NAME,
     WINDOWS_UPDATE_SIGNATURE_NAME,
     "SHA256SUMS-windows.txt",
@@ -35,13 +37,14 @@ export const verifyWindowsUpdateRelease = async (directory) => {
         sha512: untrustedManifest.file?.sha512,
       }],
     },
+    trustedPublicKeys,
   });
   await verifyDownloadedWindowsUpdate({
     path: join(directory, manifest.file.name),
     manifest,
   });
 
-  const latestYml = readFileSync(join(directory, "latest.yml"), "utf8");
+  const latestYml = readFileSync(join(directory, WINDOWS_UPDATE_CHANNEL_FILE), "utf8");
   const expectedLatestYml = [
     `version: ${manifest.version}`,
     "files:",
@@ -54,7 +57,7 @@ export const verifyWindowsUpdateRelease = async (directory) => {
     "",
   ].join("\n");
   if (latestYml !== expectedLatestYml) {
-    throw new Error("latest.yml does not exactly match the signed manifest");
+    throw new Error(`${WINDOWS_UPDATE_CHANNEL_FILE} does not exactly match the signed manifest`);
   }
   const checksum = readFileSync(join(directory, "SHA256SUMS-windows.txt"), "utf8");
   if (checksum !== `${manifest.file.sha256}  ${manifest.file.name}\n`) {

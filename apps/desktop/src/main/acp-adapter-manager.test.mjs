@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { zipSync } from "fflate";
-import { ADAPTER_DOWNLOAD_TIMEOUT_MS, MAX_ARCHIVE_BYTES, MAX_EXTRACTED_BYTES, createAcpAdapterManager, managedAdapterCommand, selectAdapterRelease, selectPiAdapterRelease } from "./acp-adapter-manager.mjs";
+import { ADAPTER_DOWNLOAD_TIMEOUT_MS, MAX_ARCHIVE_BYTES, MAX_EXTRACTED_BYTES, createAcpAdapterManager, managedAdapterCommand, renameAdapterPath, selectAdapterRelease, selectPiAdapterRelease } from "./acp-adapter-manager.mjs";
 
 const codexEntry = (version) => ({
   id: "codex-acp",
@@ -13,6 +13,29 @@ const codexEntry = (version) => ({
 });
 
 describe("managed ACP adapters", () => {
+  test("retries Windows activation rename without changing the source or target", async () => {
+    const attempts = [];
+    const waits = [];
+    await renameAdapterPath("stage", "version", { platform: "win32", wait: async (ms) => { waits.push(ms); },
+      renameImpl: async (...args) => {
+        attempts.push(args);
+        if (attempts.length < 3) throw Object.assign(new Error("locked"), { code: "EPERM" });
+      },
+    });
+    expect(attempts).toEqual([["stage", "version"], ["stage", "version"], ["stage", "version"]]);
+    expect(waits).toEqual([200, 400]);
+  });
+
+  test("bounds rename retries and propagates permanent errors without retrying POSIX", async () => {
+    for (const [platform, code, expectedCalls] of [["win32", "EPERM", 11], ["win32", "ENOENT", 1], ["linux", "EPERM", 1]]) {
+      let calls = 0;
+      const error = Object.assign(new Error("rename failed"), { code });
+      await expect(renameAdapterPath("stage", "version", { platform, wait: async () => {},
+        renameImpl: async () => { calls += 1; throw error; },
+      })).rejects.toBe(error);
+      expect(calls).toBe(expectedCalls);
+    }
+  });
   test("reports the failed stage and HTTP status, retains the old binary, and retries using the supplied network transport", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "edgeever-acp-network-"));
     const oldDir = path.join(root, "antigravity", "1.3.0");
@@ -103,11 +126,12 @@ describe("managed ACP adapters", () => {
     try {
       await manager.install("claudeCode", async () => ({ state: "available" }));
       expect(manager.installedIds()).toEqual(["claudeCode"]);
-      expect(manager.get("claudeCode").command.args[0]).toContain("claude-agent-acp");
+      expect(manager.get("claudeCode").command.args.slice(0, 2)).toEqual(["--import", new URL("./claude-acp-compat.mjs", import.meta.url).href]);
+      expect(manager.get("claudeCode").command.args.at(-1)).toContain("claude-agent-acp");
       version = "0.89.0";
       await expect(manager.install("claudeCode", async () => ({ state: "failed", detail: "handshake_failed" }), { updateOnly: true })).rejects.toThrow("handshake_failed");
       expect(createAcpAdapterManager(options).get("claudeCode").version).toBe("0.88.0");
-      await expect(manager.install("claudeCode", async (command) => ({ state: command.args[0].includes(".stage-") ? "needs_login" : "available" }), { updateOnly: true })).rejects.toThrow("adapter_probe_failed");
+      await expect(manager.install("claudeCode", async (command) => ({ state: command.args.at(-1).includes(".stage-") ? "needs_login" : "available" }), { updateOnly: true })).rejects.toThrow("adapter_probe_failed");
       expect(manager.get("claudeCode").version).toBe("0.88.0");
       await manager.install("claudeCode", async () => ({ state: "needs_login" }), { updateOnly: true });
       expect(createAcpAdapterManager(options).get("claudeCode").version).toBe("0.89.0");

@@ -2,29 +2,30 @@ import { createHash, createPublicKey, verify } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import { basename } from "node:path";
+import {
+  FORK_RELEASES_URL,
+  FORK_VERSION_PATTERN,
+  FORK_WINDOWS_UPDATE_KEYS,
+  forkTrustedWindowsUpdateKeys,
+} from "./fork-config.mjs";
 
-export const WINDOWS_UPDATE_KEY_ID = "edgeever-windows-update-2026-01";
+// Fork: trust only this fork's offline keys (primary + cold backup), never
+// upstream's, and only fork versions (X.Y.Z-rc.N). See fork-config.mjs.
+export const WINDOWS_UPDATE_KEY_ID = FORK_WINDOWS_UPDATE_KEYS.primary.keyId;
 export const WINDOWS_UPDATE_MANIFEST_NAME = "latest-windows.json";
 export const WINDOWS_UPDATE_SIGNATURE_NAME = `${WINDOWS_UPDATE_MANIFEST_NAME}.sig`;
-
-export const WINDOWS_UPDATE_PUBLIC_KEY_PEM = `-----BEGIN PUBLIC KEY-----
-MCowBQYDK2VwAyEAOuQwxSey8jGVqrvnkw9LgeBPmeqRieNg/KR0cpUy6RE=
------END PUBLIC KEY-----`;
-
-const WINDOWS_UPDATE_PUBLIC_KEYS = Object.freeze({
-  [WINDOWS_UPDATE_KEY_ID]: WINDOWS_UPDATE_PUBLIC_KEY_PEM,
-});
+export const WINDOWS_UPDATE_PUBLIC_KEYS = forkTrustedWindowsUpdateKeys();
+export const WINDOWS_UPDATE_VERSION_PATTERN = FORK_VERSION_PATTERN;
 
 const MAX_METADATA_BYTES = 64 * 1024;
-const STABLE_VERSION = /^\d+\.\d+\.\d+$/;
 const SHA256_HEX = /^[0-9a-f]{64}$/;
 const SHA512_BASE64 = /^[A-Za-z0-9+/]{86}==$/;
 
 const releaseAssetUrl = (version, name) => {
-  if (!STABLE_VERSION.test(version)) {
-    throw new Error(`Windows update version must be stable X.Y.Z: ${version}`);
+  if (!FORK_VERSION_PATTERN.test(version)) {
+    throw new Error(`Windows update version must be a fork release X.Y.Z-rc.N: ${version}`);
   }
-  return `https://github.com/tianma-if/edgeever/releases/download/v${version}/${name}`;
+  return `${FORK_RELEASES_URL}/download/v${version}/${name}`;
 };
 
 const responseBytes = async (response, label) => {
@@ -55,17 +56,19 @@ const updateFileName = (value) => {
   }
 };
 
-const assertManifestShape = (manifest, expectedVersion) => {
+const assertManifestShape = (manifest, expectedVersion, signingKeyId) => {
   if (
     manifest?.schemaVersion !== 1 ||
-    manifest.keyId !== WINDOWS_UPDATE_KEY_ID ||
+    manifest.keyId !== signingKeyId ||
+    typeof expectedVersion !== "string" ||
+    !FORK_VERSION_PATTERN.test(expectedVersion) ||
     manifest.version !== expectedVersion ||
     manifest.platform !== "win32" ||
     manifest.arch !== "x64" ||
     typeof manifest.releaseDate !== "string" ||
     Number.isNaN(Date.parse(manifest.releaseDate)) ||
     typeof manifest.file?.name !== "string" ||
-    !/^EdgeEver-\d+\.\d+\.\d+-windows-x64\.exe$/.test(manifest.file.name) ||
+    !/^EdgeEver-[0-9A-Za-z.-]+-windows-x64\.exe$/.test(manifest.file.name) ||
     typeof manifest.file.size !== "number" ||
     !Number.isSafeInteger(manifest.file.size) ||
     manifest.file.size <= 0 ||
@@ -105,10 +108,13 @@ export const verifyWindowsUpdateMetadata = ({
   const signatureEnvelope = parseJson(signatureBytes, "Windows update signature");
   if (
     signatureEnvelope?.schemaVersion !== 1 ||
-    signatureEnvelope.keyId !== WINDOWS_UPDATE_KEY_ID ||
+    typeof signatureEnvelope.keyId !== "string" ||
+    !Object.hasOwn(trustedPublicKeys, signatureEnvelope.keyId) ||
     typeof signatureEnvelope.signature !== "string"
   ) {
-    throw new Error("Windows update signature fields are invalid");
+    throw new Error(Object.keys(trustedPublicKeys).length === 0
+      ? "Windows update trust keys are not configured"
+      : "Windows update signature fields are invalid");
   }
   const signature = Buffer.from(signatureEnvelope.signature, "base64");
   if (signature.byteLength !== 64) {
@@ -121,7 +127,7 @@ export const verifyWindowsUpdateMetadata = ({
   }
 
   const manifest = parseJson(manifestBytes, "Windows update manifest");
-  assertManifestShape(manifest, expectedVersion);
+  assertManifestShape(manifest, expectedVersion, signatureEnvelope.keyId);
   assertUpdateInfoMatches(manifest, updateInfo);
   return manifest;
 };

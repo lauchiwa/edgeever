@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
+import { FORK_WINDOWS_UPDATE_KEYS } from "../apps/desktop/src/main/fork-config.mjs";
 import { createWindowsUpdateMetadata } from "./create-windows-update-metadata.mjs";
 import {
   assertWindowsUpdateSigningKey,
@@ -10,114 +11,99 @@ import {
 } from "./sign-windows-update-manifest.mjs";
 import { verifyWindowsUpdateRelease } from "./verify-windows-update-release.mjs";
 
-describe("Windows update release metadata", () => {
-  test("creates installer metadata consumed by electron-updater and the trust gate", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "edgeever-windows-metadata-"));
-    try {
-      await writeFile(join(directory, "EdgeEver-1.49.0-windows-x64.exe"), "payload");
-      const manifest = await createWindowsUpdateMetadata({ directory, version: "1.49.0" });
-      expect(manifest.file).toMatchObject({
-        name: "EdgeEver-1.49.0-windows-x64.exe",
-        size: 7,
-        sha256: "239f59ed55e737c77147cf55ad0c1b030b6d7ee748a7426952f9b852d5a935e5",
-      });
-      expect(await readFile(join(directory, "latest.yml"), "utf8"))
-        .toContain(`sha512: ${manifest.file.sha512}`);
-      expect(await readFile(join(directory, "SHA256SUMS-windows.txt"), "utf8"))
-        .toBe(`${manifest.file.sha256}  ${manifest.file.name}\n`);
-    } finally {
-      await rm(directory, { recursive: true, force: true });
-    }
-  });
+const VERSION = "1.49.0-rc.0";
+const INSTALLER = `EdgeEver-${VERSION}-windows-x64.exe`;
+const PRIMARY_ID = FORK_WINDOWS_UPDATE_KEYS.primary.keyId;
+const BACKUP_ID = FORK_WINDOWS_UPDATE_KEYS.backup.keyId;
+const PASSPHRASE = "correct horse battery staple";
 
-  test("signs only with the private key matching the expected public key", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "edgeever-windows-signing-"));
-    const { privateKey, publicKey } = generateKeyPairSync("ed25519");
-    const { publicKey: otherPublicKey } = generateKeyPairSync("ed25519");
+const withDirectory = async (prefix, run) => {
+  const directory = await mkdtemp(join(tmpdir(), prefix));
+  try { return await run(directory); } finally { await rm(directory, { recursive: true, force: true }); }
+};
+
+const keySet = () => {
+  const primary = generateKeyPairSync("ed25519");
+  const backup = generateKeyPairSync("ed25519");
+  return { primary, backup, trusted: { [PRIMARY_ID]: primary.publicKey, [BACKUP_ID]: backup.publicKey } };
+};
+
+const writeEncryptedKey = (path, privateKey, passphrase = PASSPHRASE) => writeFile(path, privateKey.export({
+  type: "pkcs8", format: "pem", cipher: "aes-256-cbc", passphrase,
+}));
+
+describe("Windows update release metadata (fork)", () => {
+  test("creates fork-versioned installer metadata consumed by electron-updater and the trust gate", () => withDirectory("edgeever-windows-metadata-", async (directory) => {
+    const { trusted } = keySet();
+    await writeFile(join(directory, INSTALLER), "payload");
+    const manifest = await createWindowsUpdateMetadata({ directory, version: VERSION, trustedPublicKeys: trusted });
+    expect(manifest).toMatchObject({ keyId: PRIMARY_ID, version: VERSION, file: {
+      name: INSTALLER, size: 7, sha256: "239f59ed55e737c77147cf55ad0c1b030b6d7ee748a7426952f9b852d5a935e5",
+    } });
+    // electron-updater fetches rc.yml for an X.Y.Z-rc.N client; latest.yml is never written.
+    expect(await readFile(join(directory, "rc.yml"), "utf8")).toContain(`sha512: ${manifest.file.sha512}`);
+    await expect(readFile(join(directory, "latest.yml"), "utf8")).rejects.toThrow();
+    expect(await readFile(join(directory, "SHA256SUMS-windows.txt"), "utf8"))
+      .toBe(`${manifest.file.sha256}  ${manifest.file.name}\n`);
+  }));
+
+  test("refuses bare upstream versions and keys the client does not pin", () => withDirectory("edgeever-windows-metadata-", async (directory) => {
+    const { trusted } = keySet();
+    await writeFile(join(directory, "EdgeEver-1.49.0-windows-x64.exe"), "payload");
+    await expect(createWindowsUpdateMetadata({ directory, version: "1.49.0", trustedPublicKeys: trusted }))
+      .rejects.toThrow("fork release X.Y.Z-rc.N");
+    await expect(createWindowsUpdateMetadata({ directory, version: VERSION, keyId: "edgeever-windows-update-2026-01", trustedPublicKeys: trusted }))
+      .rejects.toThrow("not pinned");
+  }));
+
+  test("signs with a passphrase-protected key, deriving the keyId from the key itself", () => withDirectory("edgeever-windows-signing-", async (directory) => withDirectory("edgeever-windows-keys-", async (keys) => {
+    const { primary, backup, trusted } = keySet();
+    const other = generateKeyPairSync("ed25519");
+    await writeFile(join(directory, INSTALLER), "payload");
+    // Keys live outside the release directory: the audit accepts exactly the release assets.
+    const keyPath = join(keys, "primary.pem");
+    await writeEncryptedKey(keyPath, primary.privateKey);
+
+    expect(() => assertWindowsUpdateSigningKey({ privateKeyPath: keyPath, trustedPublicKeys: trusted }))
+      .toThrow("passphrase is required");
+    expect(() => assertWindowsUpdateSigningKey({ privateKeyPath: keyPath, passphrase: "wrong passphrase!!", trustedPublicKeys: trusted }))
+      .toThrow("could not be decrypted");
+    expect(assertWindowsUpdateSigningKey({ privateKeyPath: keyPath, passphrase: PASSPHRASE, trustedPublicKeys: trusted }).keyId)
+      .toBe(PRIMARY_ID);
+
+    await createWindowsUpdateMetadata({ directory, version: VERSION, trustedPublicKeys: trusted });
     const manifestPath = join(directory, "latest-windows.json");
     const signaturePath = `${manifestPath}.sig`;
-    const privateKeyPath = join(directory, "private.pem");
-    try {
-      await writeFile(manifestPath, `${JSON.stringify({
-        schemaVersion: 1,
-        keyId: "edgeever-windows-update-2026-01",
-        version: "1.49.0",
-        platform: "win32",
-        arch: "x64",
-        releaseDate: "2026-08-30T00:00:00.000Z",
-        file: {
-          name: "EdgeEver-1.49.0-windows-x64.exe",
-          size: 7,
-          sha512: "cLM86ckEfjD5F+fqE+Qvd2cAjD9PnJuvSeQ5D8YlVJ6WJe7jm5RUUHTooYJM8/I4RjsRvAPZc0jg/CmZyh//fw==",
-          sha256: "239f59ed55e737c77147cf55ad0c1b030b6d7ee748a7426952f9b852d5a935e5",
-        },
-      })}\n`);
-      await writeFile(privateKeyPath, privateKey.export({ type: "pkcs8", format: "pem" }));
-      expect(assertWindowsUpdateSigningKey({
-        privateKeyPath,
-        expectedPublicKey: publicKey,
-      }).asymmetricKeyType).toBe("ed25519");
-      expect(signWindowsUpdateManifest({
-        manifestPath,
-        signaturePath,
-        privateKeyPath,
-        expectedPublicKey: publicKey,
-      }).signature).toHaveLength(88);
-      expect(() => signWindowsUpdateManifest({
-        manifestPath,
-        signaturePath,
-        privateKeyPath,
-        expectedPublicKey: otherPublicKey,
-      })).toThrow("does not match");
-    } finally {
-      await rm(directory, { recursive: true, force: true });
-    }
-  });
+    expect(signWindowsUpdateManifest({ manifestPath, signaturePath, privateKeyPath: keyPath, passphrase: PASSPHRASE, trustedPublicKeys: trusted }))
+      .toMatchObject({ keyId: PRIMARY_ID });
+    await expect(verifyWindowsUpdateRelease(directory, { trustedPublicKeys: trusted })).resolves.toMatchObject({ version: VERSION });
 
-  test("audits the complete production release asset set", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "edgeever-windows-release-audit-"));
-    const manifest = {
-      schemaVersion: 1,
-      keyId: "edgeever-windows-update-2026-01",
-      version: "1.49.0",
-      platform: "win32",
-      arch: "x64",
-      releaseDate: "2026-08-30T00:00:00.000Z",
-      file: {
-        name: "EdgeEver-1.49.0-windows-x64.exe",
-        size: 7,
-        sha512: "cLM86ckEfjD5F+fqE+Qvd2cAjD9PnJuvSeQ5D8YlVJ6WJe7jm5RUUHTooYJM8/I4RjsRvAPZc0jg/CmZyh//fw==",
-        sha256: "239f59ed55e737c77147cf55ad0c1b030b6d7ee748a7426952f9b852d5a935e5",
-      },
-    };
+    // A trusted key that the manifest does not name is refused before signing.
+    const backupPath = join(keys, "backup.pem");
+    await writeEncryptedKey(backupPath, backup.privateKey);
+    expect(() => signWindowsUpdateManifest({ manifestPath, signaturePath, privateKeyPath: backupPath, passphrase: PASSPHRASE, trustedPublicKeys: trusted }))
+      .toThrow("key metadata is invalid");
+    // A key the client does not pin is refused outright.
+    const otherPath = join(keys, "other.pem");
+    await writeEncryptedKey(otherPath, other.privateKey);
+    expect(() => signWindowsUpdateManifest({ manifestPath, signaturePath, privateKeyPath: otherPath, passphrase: PASSPHRASE, trustedPublicKeys: trusted }))
+      .toThrow("does not match");
+  })));
+
+  test("audits the complete release asset set, including a tampered installer", () => withDirectory("edgeever-windows-release-audit-", async (directory) => {
+    const { primary, trusted } = keySet();
+    const keyPath = join(tmpdir(), `edgeever-audit-key-${process.pid}-${Date.now()}.pem`);
     try {
-      await writeFile(join(directory, manifest.file.name), "payload");
-      await writeFile(join(directory, "latest-windows.json"), `${JSON.stringify(manifest, null, 2)}\n`);
-      await writeFile(join(directory, "latest-windows.json.sig"), `${JSON.stringify({
-        schemaVersion: 1,
-        keyId: manifest.keyId,
-        signature: "Itc3UD0G6Hn6BWdk9qlJ4SoqAUDn8efi1VRVUWDtA3Ip5+gwpAj7HxElxM6D/GXcAlHFxnVv19soEWxlfZLCDA==",
-      })}\n`);
-      await writeFile(join(directory, "latest.yml"), [
-        `version: ${manifest.version}`,
-        "files:",
-        `  - url: ${manifest.file.name}`,
-        `    sha512: ${manifest.file.sha512}`,
-        `    size: ${manifest.file.size}`,
-        `path: ${manifest.file.name}`,
-        `sha512: ${manifest.file.sha512}`,
-        `releaseDate: '${manifest.releaseDate}'`,
-        "",
-      ].join("\n"));
-      await writeFile(
-        join(directory, "SHA256SUMS-windows.txt"),
-        `${manifest.file.sha256}  ${manifest.file.name}\n`,
-      );
-      await expect(verifyWindowsUpdateRelease(directory)).resolves.toEqual(manifest);
-      await writeFile(join(directory, manifest.file.name), "tampered");
-      await expect(verifyWindowsUpdateRelease(directory)).rejects.toThrow("size does not match");
+      await writeFile(join(directory, INSTALLER), "payload");
+      await writeEncryptedKey(keyPath, primary.privateKey);
+      await createWindowsUpdateMetadata({ directory, version: VERSION, trustedPublicKeys: trusted });
+      const manifestPath = join(directory, "latest-windows.json");
+      signWindowsUpdateManifest({ manifestPath, signaturePath: `${manifestPath}.sig`, privateKeyPath: keyPath, passphrase: PASSPHRASE, trustedPublicKeys: trusted });
+      await expect(verifyWindowsUpdateRelease(directory, { trustedPublicKeys: trusted })).resolves.toMatchObject({ keyId: PRIMARY_ID });
+      await writeFile(join(directory, INSTALLER), "tampered");
+      await expect(verifyWindowsUpdateRelease(directory, { trustedPublicKeys: trusted })).rejects.toThrow("size does not match");
     } finally {
-      await rm(directory, { recursive: true, force: true });
+      await rm(keyPath, { force: true });
     }
-  });
+  }));
 });

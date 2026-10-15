@@ -51,7 +51,7 @@ describe("desktop crash diagnostics", () => {
       },
     });
     const url = new URL(issueUrl);
-    expect(url.origin + url.pathname).toBe("https://github.com/tianma-if/edgeever/issues/new");
+    expect(url.origin + url.pathname).toBe("https://github.com/lauchiwa/edgeever/issues/new");
     expect(url.searchParams.get("template")).toBe("bug.yml");
     expect(url.searchParams.get("client")).toBe("macOS");
     expect(url.searchParams.get("title")).toContain("darwin x64");

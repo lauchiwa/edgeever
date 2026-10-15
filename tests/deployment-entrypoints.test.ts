@@ -461,8 +461,9 @@ describe("Cloudflare deployment entrypoints", () => {
     expect(scripts["test:bulk"]).toContain("--path-ignore-patterns='tests/e2e/**'");
     expect(scripts["test:bulk"]).toContain("apps/api/src/companion-learning.test.mjs");
     expect(scripts["test:bulk"]).toContain("apps/api/src/resource-upload-integration.test.mjs");
+    expect(scripts["test:bulk"]).toContain("apps/desktop/src/main/workbuddy-auth.test.mjs");
     expect(scripts["test:integration"]).toBe(
-      "bun test apps/api/src/companion-learning.test.mjs apps/api/src/resource-upload-integration.test.mjs",
+      "bun test apps/api/src/companion-learning.test.mjs apps/api/src/resource-upload-integration.test.mjs && bun test --cwd apps/desktop src/main/workbuddy-auth.test.mjs",
     );
     expect(workflow).toContain("bun run test");
     expect(workflow.match(/if: steps\.upstream\.outputs\.align_mode == 'merge'/g)).toHaveLength(2);
@@ -500,7 +501,10 @@ describe("Cloudflare deployment entrypoints", () => {
     const workflowsDirectory = resolve(repositoryRoot, ".github/workflows");
     const workflowFiles = readdirSync(workflowsDirectory)
       .filter((file) => /\.ya?ml$/.test(file))
-      .filter((file) => file !== "sync-edgeever-upstream.yml");
+      .filter((file) => file !== "sync-edgeever-upstream.yml")
+      // Fork (lauchiwa/edgeever): fork-*.yml are this fork's own workflows and are
+      // gated to the fork instead; scripts/fork-workflows.test.mjs checks them.
+      .filter((file) => !file.startsWith("fork-"));
 
     for (const file of workflowFiles) {
       const workflow = readRepositoryFile(`.github/workflows/${file}`);

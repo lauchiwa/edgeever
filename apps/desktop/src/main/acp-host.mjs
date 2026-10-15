@@ -9,9 +9,11 @@ import { Readable, Writable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { ClientSideConnection, ndJsonStream, PROTOCOL_VERSION, RequestError } from "@agentclientprotocol/sdk";
 import { waitForChildProcessSpawn } from "./child-process-start.mjs";
-import { createAcpAdapterManager } from "./acp-adapter-manager.mjs";
+import { createAcpAdapterManager, npmAdapterCommand } from "./acp-adapter-manager.mjs";
 import { startAcpMcpBridge } from "./acp-mcp-bridge.mjs";
 import { withAntigravityMacProxy } from "./antigravity-proxy.mjs";
+import readCmdShim from "read-cmd-shim";
+import { stopAcpChild, stopAcpChildSync } from "./acp-process-lifecycle.mjs";
 import { authenticateWorkBuddy, prepareWorkBuddyAuth } from "./workbuddy-auth.mjs";
 
 const ADAPTERS = {
@@ -53,7 +55,7 @@ const trackChild = (child) => {
     exitHooked = true;
     process.once("exit", () => {
       for (const live of liveChildren) {
-        try { live.kill("SIGKILL"); } catch { /* already gone */ }
+        stopAcpChildSync(live);
       }
     });
   }
@@ -106,7 +108,9 @@ export function detectInstalledAgentApps({
     return [];
   };
   return ["codex", "antigravity", "piAgent"].filter((id) => {
-    if (id === "piAgent") return lookup(platform === "win32" ? ["pi.exe"] : ["pi"])
+    if (id === "piAgent") return (platform === "win32"
+      ? !!localExecutable("pi", resolutionDeps({ platform, pathEnv, home, env, accessSync: access }))
+      : lookup(["pi"]))
       || (platform !== "win32" && [path.join(home, ".local", "bin", "pi"), ...(platform === "darwin" ? ["/opt/homebrew/bin/pi", "/usr/local/bin/pi"] : [])].some((candidate) => exists(candidate)));
     const names = platform === "win32" ? [`${id}.exe`, id] : [id];
     return lookup(names) || candidates(id).some((candidate) => candidate && exists(candidate));
@@ -122,6 +126,7 @@ const resolutionDeps = (deps = {}) => ({
   realpath: deps.realpathSync ?? realpathSync,
   stat: deps.statSync ?? statSync,
   exists: deps.existsSync ?? existsSync,
+  readCmdShim: deps.readCmdShimSync ?? readCmdShim.sync,
   pathEnv: deps.pathEnv ?? process.env.PATH ?? "",
   delimiter: deps.delimiter ?? path.delimiter,
   sep: deps.sep ?? path.sep,
@@ -149,12 +154,21 @@ export function resolveAcpCommand(input, deps = {}) {
 function localExecutable(name, deps) {
   const executable = deps.platform === "win32" ? `${name}.exe` : name;
   const candidates = [findOnPath([executable], deps)];
+  if (deps.platform === "win32") candidates.push(findOnPath([`${name}.cmd`], deps));
   if (deps.platform !== "win32") candidates.push(path.join(deps.home, ".local", "bin", name));
   if (deps.platform === "darwin") candidates.push(`/opt/homebrew/bin/${name}`, `/usr/local/bin/${name}`);
   for (const candidate of candidates) {
     if (!candidate) continue;
     try {
-      const actual = deps.realpath(candidate);
+      let actual = deps.realpath(candidate);
+      if (deps.platform === "win32" && /\.cmd$/i.test(actual)) {
+        // Read npm's shim using npm's own parser; never execute arbitrary batch
+        // content or enable a shell. Only node_modules JS entry points qualify.
+        const target = deps.readCmdShim(actual).replace(/\\/g, "/");
+        if (!target.startsWith("node_modules/") || target.split("/").includes("..")
+          || /[\0%]/.test(target) || !/\.[cm]?js$/i.test(target)) continue;
+        actual = deps.realpath(path.resolve(path.dirname(actual), target));
+      }
       if (deps.stat(actual).isFile()) { deps.access(actual, fsConstants.X_OK); return actual; }
     } catch { /* Try another installation. */ }
   }
@@ -164,9 +178,10 @@ function localExecutable(name, deps) {
 function resolveLocalAcpCli(name, args, deps) {
   const executable = localExecutable(name, deps);
   if (!executable) return { ok: false, state: "not_installed" };
-  return { ok: true, command: /\.[cm]?js$/i.test(executable)
-    ? { command: deps.executablePath, args: [executable, ...args], env: { ELECTRON_RUN_AS_NODE: "1" } }
-    : { command: executable, args } };
+  if (!/\.[cm]?js$/i.test(executable)) return { ok: true, command: { command: executable, args } };
+  return { ok: true, command: name === "claude-agent-acp"
+    ? npmAdapterCommand(executable, "claudeCode", deps.executablePath)
+    : { command: deps.executablePath, args: [executable, ...args], env: { ELECTRON_RUN_AS_NODE: "1" } } };
 }
 
 function resolveAgentCli(name, args, deps) {
@@ -607,11 +622,24 @@ export async function createAcpWorkspace(mkdtempImpl = mkdtemp, root = tmpdir())
   return directory;
 }
 
-export async function removeAcpWorkspace(directory, rmImpl = rm) {
+export async function removeAcpWorkspace(directory, rmImpl = rm, { schedule = setTimeout } = {}) {
   if (typeof directory !== "string" || !directory) return;
   const resolved = path.resolve(directory);
   if (resolved === path.resolve(homedir()) || !resolved.includes(WORKSPACE_MARKER)) return;
-  await rmImpl(resolved, { recursive: true, force: true });
+  const flags = { recursive: true, force: true, maxRetries: 5, retryDelay: 100 };
+  try {
+    await rmImpl(resolved, flags);
+    return true;
+  } catch (error) {
+    // Cleanup must not turn an available adapter into an installation failure,
+    // or replace its original authentication/connection error. Retry only this
+    // owned workspace, once, after lingering Windows handles have had time to close.
+    if (["EBUSY", "EPERM", "ENOTEMPTY"].includes(error?.code)) {
+      const timer = schedule(() => { void rmImpl(resolved, flags).catch(() => {}); }, 30_000);
+      timer?.unref?.();
+    }
+    return false;
+  }
 }
 
 const normalizePromptCapabilities = (initialized) => {
@@ -670,19 +698,6 @@ const createEdgeEverAcpClient = (requestId, emit, allowPermissions, onAuthStatus
   },
 });
 
-function stopChild(child) {
-  if (!child) return;
-  const killTimer = setTimeout(() => {
-    if (child.exitCode == null) {
-      try { child.kill("SIGKILL"); } catch { /* already gone */ }
-    }
-  }, 500);
-  killTimer.unref?.();
-  child.once?.("exit", () => clearTimeout(killTimer));
-  try { child.stdin?.destroy(); } catch { /* closed */ }
-  try { child.kill("SIGTERM"); } catch { /* already gone */ }
-}
-
 const promptFailureMessage = (failure) => {
   if (failure.state === "not_installed") return "not_installed";
   if (failure.state === "needs_login") return "needs_login";
@@ -704,7 +719,19 @@ export function promptResultFailure(result) {
 export function createAcpHostRuntime(options = {}) {
   const spawnImpl = options.spawnImpl ?? nodeSpawn;
   const mkdtempImpl = options.mkdtemp ?? mkdtemp;
-  const rmImpl = options.rm ?? rm;
+  const workspaceStops = new Map();
+  const rmImpl = async (directory, flags) => {
+    // Every cleanup path (probe, failed connect, install, prompt, cancellation)
+    // must wait for the same idempotent stop operation before touching its cwd.
+    await workspaceStops.get(directory)?.();
+    workspaceStops.delete(directory);
+    try {
+      await (options.rm ?? rm)(directory, flags);
+    } catch (error) {
+      try { options.onDiagnostic?.({ requestId: "cleanup", message: `workspace_cleanup_deferred (${sanitizeFailureDetail(error?.code || "cleanup_failed")})` }); } catch { /* diagnostics are optional */ }
+      throw error;
+    }
+  };
   const version = options.clientVersion ?? clientVersion();
   const handshakeTimeoutMs = options.handshakeTimeoutMs ?? HANDSHAKE_TIMEOUT_MS;
   const authenticationTimeoutMs = options.authenticationTimeoutMs ?? 5 * 60_000;
@@ -752,7 +779,8 @@ export function createAcpHostRuntime(options = {}) {
       resolveAuthStatus();
       if (connected && status.kind === "none") abort();
     };
-    const abort = () => stopChild(child);
+    const abort = () => stopAcpChild(child);
+    workspaceStops.set(cwd, abort);
     signal?.addEventListener("abort", abort, { once: true });
     try {
       if (signal?.aborted) throw Object.assign(new Error("connection_timeout"), { code: "TIMEOUT" });
@@ -1137,7 +1165,7 @@ export function createAcpHostRuntime(options = {}) {
       } catch {
         // The process may already be gone. Killing it is enough.
       }
-      session.stop();
+      await session.stop();
       void session.mcpBridge?.close();
       return { ok: true };
     },

@@ -1,0 +1,51 @@
+name: Fork upstream watch
+
+# Read-only daily check: has upstream EdgeEver published a formal release that
+# main does not contain yet? It changes nothing. Issues are disabled on this
+# fork, so a pending sync is reported by failing this run (GitHub emails the
+# owner about failed scheduled runs) with the exact commands in the summary.
+# The merge itself is done locally: scripts/fork-sync-upstream.mjs start.
+# Upstream's sync-edgeever-upstream.yml is disabled in this repository's
+# settings: it would reset main to an upstream snapshot.
+on:
+  schedule:
+    - cron: "47 1 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  watch:
+    if: github.repository == 'lauchiwa/edgeever'
+    name: Upstream release merged into main
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Compare
+        run: |
+          set -euo pipefail
+          status="$(node scripts/fork-sync-upstream.mjs status)"
+          echo "${status}"
+          tag="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).tag)' "${status}")"
+          merged="$(node -e 'process.stdout.write(String(JSON.parse(process.argv[1]).merged))' "${status}")"
+          if [ "${merged}" = "true" ]; then
+            echo "main already contains upstream ${tag}." >> "${GITHUB_STEP_SUMMARY}"
+            exit 0
+          fi
+          {
+            echo "### Upstream EdgeEver ${tag} is not merged into main"
+            echo
+            echo '```powershell'
+            echo "node scripts/fork-sync-upstream.mjs start ${tag}"
+            echo '```'
+            echo
+            echo "Then follow the printed steps (gates, push sync/${tag}, open a PR). See docs/fork-releases.md."
+          } >> "${GITHUB_STEP_SUMMARY}"
+          echo "::warning title=Upstream ${tag} pending::Run node scripts/fork-sync-upstream.mjs start ${tag}"
+          exit 1
