@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "bun:test";
+import { FORK_REPOSITORY } from "../apps/desktop/src/main/fork-config.mjs";
 
 const workflow = readFileSync(new URL("../.github/workflows/desktop-build.yml", import.meta.url), "utf8");
 const mobileWorkflow = readFileSync(new URL("../.github/workflows/mobile-build.yml", import.meta.url), "utf8");
@@ -22,8 +23,10 @@ describe("desktop release workflow", () => {
     expect(desktopBuilderConfig).toContain([
       "publish:",
       "  provider: github",
-      "  owner: tianma-if",
-      "  repo: edgeever",
+      "  # Fork: updates come from this fork only (see apps/desktop/src/main/fork-config.mjs).",
+      // Fork: updates come from this fork (see docs/fork-releases.md).
+      `  owner: ${FORK_REPOSITORY.split("/")[0]}`,
+      `  repo: ${FORK_REPOSITORY.split("/")[1]}`,
       "  releaseType: release",
     ].join("\n"));
     expect(desktopBuilderConfig).toContain("schemes:\n      - edgeever");

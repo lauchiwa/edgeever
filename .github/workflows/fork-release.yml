@@ -1,0 +1,149 @@
+name: Fork release (Windows)
+
+# Builds this fork's Windows release and leaves it as a Draft pre-release in
+# this repository. Pushing a tag vX.Y.Z-rc.N runs it (see docs/fork-releases.md).
+#
+# It never signs: the Ed25519 private key stays on the maintainer's machine,
+# so a compromised workflow, action or token cannot produce an update that
+# installed clients accept. The maintainer finishes the release locally:
+#   node scripts/fork-sign-release.mjs vX.Y.Z-rc.N --publish
+# which signs latest-windows.json, re-downloads and audits all assets, then
+# publishes. Drafts are invisible to the updater.
+on:
+  push:
+    tags:
+      - "v*-rc.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag vX.Y.Z-rc.N to rebuild into its Draft
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fork-release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    if: github.repository == 'lauchiwa/edgeever'
+    name: Build Windows x64 Draft
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: Check the tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/fork-release-version.mjs check "${TAG}"
+          git fetch origin main
+          git merge-base --is-ancestor "${TAG}^{commit}" origin/main || {
+            echo "::error::${TAG} is not on main. Release only reviewed, merged commits."; exit 1; }
+          if gh release view "${TAG}" -R "${GITHUB_REPOSITORY}" --json isDraft --jq .isDraft 2>/dev/null | grep -qx false; then
+            echo "::error::${TAG} is already published; a published release is never rebuilt."; exit 1
+          fi
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            bun install --frozen-lockfile
+            if ($LASTEXITCODE -eq 0) { exit 0 }
+            if ($attempt -eq 3) { exit $LASTEXITCODE }
+            Start-Sleep -Seconds (15 * $attempt)
+          }
+
+      # main keeps the bare upstream version; the release version comes from the tag.
+      - name: Apply the release version
+        shell: bash
+        run: node scripts/fork-release-version.mjs apply "${TAG}"
+
+      - name: Release gates
+        shell: bash
+        env:
+          EDGE_EVER_FORK_RELEASE: "1"
+        run: |
+          set -euo pipefail
+          bun test scripts/fork-invariants.test.mjs scripts/windows-update-metadata.test.mjs \
+            apps/desktop/src/main/windows-update-trust.test.mjs
+          bun test --cwd apps/desktop src/main/acp-host-native.test.mjs src/main/acp-windows-command.test.mjs \
+            src/main/acp-process-lifecycle.test.mjs src/main/claude-acp-compat.test.mjs
+          bun run typecheck
+
+      - name: Build Web renderer
+        env:
+          EDGE_EVER_DESKTOP_BUILD: "1"
+        run: bun run build:web
+
+      - name: Build x64 Rust sidecar
+        run: cargo build --manifest-path crates/desktop-sidecar/Cargo.toml --release
+
+      - name: Package Windows installer
+        env:
+          EDGE_EVER_DESKTOP_ARCH: x64
+          EDGE_EVER_DESKTOP_TARGET: win
+        run: bun scripts/run-desktop-builder.mjs --publish never
+
+      - name: Verify package and first launch
+        shell: bash
+        env:
+          EDGE_EVER_DESKTOP_ARCH: x64
+          EDGE_EVER_VERIFY_TARGET: win32
+        run: |
+          set -euo pipefail
+          bun scripts/verify-desktop-package.mjs
+          bun run verify:packaged-desktop-startup -- release/desktop/win-unpacked/EdgeEver.exe
+
+      - name: Create unsigned update metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          stage="${RUNNER_TEMP}/fork-release"
+          mkdir -p "${stage}"
+          cp "release/desktop/EdgeEver-${version}-windows-x64.exe" "${stage}/"
+          node scripts/create-windows-update-metadata.mjs "${stage}" "${version}"
+          ls -la "${stage}"
+
+      - name: Upload Draft pre-release
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          stage="${RUNNER_TEMP}/fork-release"
+          base="${version%-rc.*}"
+          notes="$(printf '%s\n' \
+            "## 主要更新" "" "- 基于上游 EdgeEver v${base} 的二开版本（Windows x64）。" "" \
+            "## Key Changes" "" "- Fork build of this repository, synced from upstream EdgeEver v${base} (Windows x64).")"
+          if gh release view "${TAG}" -R "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            for asset in $(gh release view "${TAG}" -R "${GITHUB_REPOSITORY}" --json assets --jq '.assets[].name'); do
+              gh release delete-asset "${TAG}" "${asset}" -R "${GITHUB_REPOSITORY}" --yes
+            done
+          else
+            gh release create "${TAG}" -R "${GITHUB_REPOSITORY}" --draft --prerelease \
+              --verify-tag --title "EdgeEver ${version}" --notes "${notes}"
+          fi
+          gh release upload "${TAG}" -R "${GITHUB_REPOSITORY}" "${stage}"/*
+          {
+            echo "### Draft ${TAG} is ready to sign"
+            echo
+            echo '```powershell'
+            echo '$env:EDGE_EVER_WINDOWS_UPDATE_SIGNING_KEY = "$HOME\.config\edgeever-fork\windows-update-ed25519-primary.pem"'
+            echo "node scripts/fork-sign-release.mjs ${TAG} --publish"
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"

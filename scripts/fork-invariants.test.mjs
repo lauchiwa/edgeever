@@ -1,0 +1,134 @@
+// Fork invariants: fail when an upstream sync merges cleanly but silently
+// brings back upstream behaviour. Git only reports conflicts; this reports
+// the merges that "succeed" and still undo this fork. See docs/fork-releases.md.
+import { createHash, createPublicKey } from "node:crypto";
+import { execFileSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { describe, expect, test } from "bun:test";
+import {
+  FORK_NEW_ISSUE_URL,
+  FORK_RELEASE_CHANNEL,
+  FORK_RELEASES_URL,
+  FORK_REPOSITORY,
+  FORK_REPOSITORY_URL,
+  FORK_VERSION_PATTERN,
+  FORK_WINDOWS_UPDATE_KEYS,
+  forkTrustedWindowsUpdateKeys,
+} from "../apps/desktop/src/main/fork-config.mjs";
+import * as sharedForkConfig from "../packages/shared/src/fork-config.ts";
+import { WINDOWS_UPDATE_PUBLIC_KEYS } from "../apps/desktop/src/main/windows-update-trust.mjs";
+
+const UPSTREAM = "tianma-if/edgeever";
+const UPSTREAM_WINDOWS_KEY_ID = "edgeever-windows-update-2026-01";
+const UPSTREAM_WINDOWS_PUBLIC_KEY = "MCowBQYDK2VwAyEAOuQwxSey8jGVqrvnkw9LgeBPmeqRieNg/KR0cpUy6RE=";
+const root = join(import.meta.dir, "..");
+const read = (file) => readFileSync(join(root, file), "utf8");
+
+// The only upstream references allowed in shipped desktop/renderer code, each
+// pointing at something this fork deliberately does not publish itself.
+const ALLOWED_UPSTREAM = {
+  "apps/web/src/components/NotebookPane.tsx": { count: 1, why: "Android APK: the fork does not build mobile" },
+  "apps/web/src/components/settings/SystemInfoPanel.tsx": { count: 2, why: "release notes of the upstream server instance" },
+  "apps/web/src/components/settings/PluginManagerCard.tsx": { count: 2, why: "upstream plugin development docs" },
+};
+const SCANNED = ["apps/desktop/src", "apps/web/src", "packages/shared/src"];
+// Also catches regex-escaped forms such as tianma-if\/edgeever, which hard-code
+// the repository just as surely as a URL does. Matching runs in JavaScript:
+// git grep -E does not match the escaped form consistently across platforms.
+const UPSTREAM_LITERAL = /tianma-if\\?\/edgeever(?![-\w])/g;
+
+// Tracked and new (untracked, not ignored) shipped source files.
+const upstreamReferences = () => {
+  const files = execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard", "--", ...SCANNED],
+    { cwd: root, encoding: "utf8" }).split(/\r?\n/)
+    .filter((file) => /\.(m?js|cjs|tsx?)$/.test(file) && !/\.(test|spec)\./.test(file) && existsSync(join(root, file)));
+  return Object.fromEntries([...new Set(files)].flatMap((file) => {
+    const count = (read(file).match(UPSTREAM_LITERAL) ?? []).length;
+    return count ? [[file, count]] : [];
+  }));
+};
+
+describe("fork identity", () => {
+  test("points at this fork, not upstream, in both the desktop and renderer config", () => {
+    expect(FORK_REPOSITORY).not.toBe(UPSTREAM);
+    expect(FORK_REPOSITORY).toMatch(/^[\w.-]+\/[\w.-]+$/);
+    for (const name of ["FORK_REPOSITORY", "FORK_REPOSITORY_URL", "FORK_RELEASES_URL", "FORK_NEW_ISSUE_URL"]) {
+      expect(sharedForkConfig[name]).toBe({ FORK_REPOSITORY, FORK_REPOSITORY_URL, FORK_RELEASES_URL, FORK_NEW_ISSUE_URL }[name]);
+    }
+    // /releases/latest omits pre-releases, and every fork release is one.
+    expect(FORK_RELEASES_URL).not.toContain("/latest");
+  });
+
+  test("electron-builder publishes to and updates from this fork", () => {
+    const builder = read("apps/desktop/electron-builder.yml");
+    const [owner, repo] = FORK_REPOSITORY.split("/");
+    expect(builder).toMatch(new RegExp(`publish:[\\s\\S]*?provider: github[\\s\\S]*?owner: ${owner}\\s[\\s\\S]*?repo: ${repo}\\s`));
+    // The channel must come from the version (rc), never a fixed latest.yml.
+    expect(builder).not.toMatch(/^\s*(channel|detectUpdateChannel)\s*:/m);
+  });
+
+  test("no new upstream repository literal appears in shipped desktop or renderer code", () => {
+    expect(upstreamReferences()).toEqual(Object.fromEntries(Object.entries(ALLOWED_UPSTREAM).map(([file, { count }]) => [file, count])));
+  }, 20_000);
+});
+
+describe("fork versions and update channel", () => {
+  test("accepts only X.Y.Z-rc.N with a numeric counter", () => {
+    expect(FORK_RELEASE_CHANNEL).toBe("rc");
+    for (const ok of ["1.119.0-rc.0", "1.119.0-rc.10"]) expect(FORK_VERSION_PATTERN.test(ok)).toBe(true);
+    // Bare versions outrank every rc; alpha/beta also accept stable releases.
+    for (const bad of ["1.119.0", "1.119.0-alpha.1", "1.119.0-beta.1", "1.119.0-rc.01", "1.119.0-rc.1a", "v1.119.0-rc.1"]) {
+      expect(FORK_VERSION_PATTERN.test(bad)).toBe(false);
+    }
+  });
+
+  test("main keeps the upstream base version; the rc suffix is applied only at release time", () => {
+    for (const file of ["package.json", "apps/desktop/package.json"]) {
+      expect(JSON.parse(read(file)).version).toMatch(/^\d+\.\d+\.\d+$/);
+    }
+  });
+});
+
+describe("fork Windows update trust", () => {
+  // Pinned on purpose: replacing a key orphans every installed client, so a
+  // change here must be a deliberate, reviewed edit of both files.
+  test("pins exactly the generated primary and backup keys", () => {
+    const fingerprint = (pem) => createHash("sha256").update(createPublicKey(pem).export({ type: "spki", format: "der" })).digest("hex");
+    expect(fingerprint(FORK_WINDOWS_UPDATE_KEYS.primary.publicKeyPem)).toBe("1a383c020d4df0d48d77a715bee892e9c90527baf1ffb5d60172c2b8b46767a0");
+    expect(fingerprint(FORK_WINDOWS_UPDATE_KEYS.backup.publicKeyPem)).toBe("22c1cb666119ae2907c7111083c346079907f67caf8621bc220748b703106f7d");
+  });
+  test("never trusts upstream's key, and only trusts this fork's primary and backup ids", () => {
+    const ids = Object.keys(WINDOWS_UPDATE_PUBLIC_KEYS);
+    expect(ids).not.toContain(UPSTREAM_WINDOWS_KEY_ID);
+    expect(JSON.stringify(Object.values(WINDOWS_UPDATE_PUBLIC_KEYS))).not.toContain(UPSTREAM_WINDOWS_PUBLIC_KEY);
+    const allowed = Object.values(FORK_WINDOWS_UPDATE_KEYS).map((key) => key.keyId);
+    for (const id of ids) expect(allowed).toContain(id);
+    expect(read("apps/desktop/src/main/windows-update-trust.mjs")).not.toContain(UPSTREAM_WINDOWS_PUBLIC_KEY);
+  });
+
+  // Enforced by the release workflow (EDGE_EVER_FORK_RELEASE=1); a release
+  // without both pinned keys would ship a client that can never be rotated.
+  test.skipIf(process.env.EDGE_EVER_FORK_RELEASE !== "1")("a release pins both keys, distinct and Ed25519", () => {
+    const keys = forkTrustedWindowsUpdateKeys();
+    expect(Object.keys(keys).sort()).toEqual(Object.values(FORK_WINDOWS_UPDATE_KEYS).map((key) => key.keyId).sort());
+    const exported = Object.values(keys).map((pem) => {
+      const key = createPublicKey(pem);
+      expect(key.asymmetricKeyType).toBe("ed25519");
+      return key.export({ type: "spki", format: "der" }).toString("base64");
+    });
+    expect(new Set(exported).size).toBe(2);
+  });
+});
+
+describe("fork fixes kept across upstream syncs", () => {
+  test("Windows ACP fixes are still wired in", () => {
+    for (const file of ["acp-process-lifecycle.mjs", "claude-acp-compat.mjs"]) {
+      expect(existsSync(join(root, "apps/desktop/src/main", file))).toBe(true);
+    }
+    const host = read("apps/desktop/src/main/acp-host.mjs");
+    expect(host).toContain("./acp-process-lifecycle.mjs");
+    expect(host).toContain("read-cmd-shim");
+    expect(read("apps/desktop/src/main/acp-adapter-manager.mjs")).toContain("claude-acp-compat.mjs");
+  });
+});

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { getClientDisplaySizeParts } from "@edgeever/shared";
+import { FORK_RELEASES_URL, getClientDisplaySizeParts } from "@edgeever/shared";
 import type { DeploymentMetadata } from "@edgeever/shared/deployment-metadata";
 import { Activity, CircleCheck, CircleX, Cloud, Copy, ExternalLink, Info, LoaderCircle, MonitorSmartphone, RefreshCw, RotateCcw } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -407,6 +407,8 @@ export const SystemInfoPanel = ({ active = true }: { active?: boolean }) => {
     viewportRevision,
   ]);
   const releaseTag = release ? getReleaseTagForVersion(release.version) : null;
+  // The instance (server) runs upstream EdgeEver; its release notes stay upstream.
+  // Desktop downloads below come from the fork (FORK_RELEASES_URL).
   const releaseUrl = releaseTag
     ? `https://github.com/tianma-if/edgeever/releases/tag/${encodeURIComponent(releaseTag)}`
     : "https://github.com/tianma-if/edgeever/releases/latest";
@@ -556,7 +558,7 @@ export const SystemInfoPanel = ({ active = true }: { active?: boolean }) => {
                   variant="outline"
                   className="h-7 bg-card px-2.5 text-xs shadow-xs hover:bg-slate-50"
                 >
-                  <a href="https://github.com/tianma-if/edgeever/releases/latest" target="_blank" rel="noreferrer">
+                  <a href={FORK_RELEASES_URL} target="_blank" rel="noreferrer">
                     <ExternalLink className="h-3.5 w-3.5" />
                     {t("systemInfo.desktopDownloadLatest")}
                   </a>
@@ -610,7 +612,7 @@ export const SystemInfoPanel = ({ active = true }: { active?: boolean }) => {
                     {updateDiagnosticCopyState === "copied" ? t("systemInfo.desktopUpdateDiagnosticCopied") : t("systemInfo.desktopCopyUpdateDiagnostic")}
                   </Button>
                   {updateDiagnosticCopyState === "error" ? <span role="status">{t("systemInfo.copyFailed")}</span> : null}
-                  <a className="underline underline-offset-2" href="https://github.com/tianma-if/edgeever/releases/latest" target="_blank" rel="noreferrer">
+                  <a className="underline underline-offset-2" href={FORK_RELEASES_URL} target="_blank" rel="noreferrer">
                     {t("systemInfo.desktopUpdateManualDownload")}
                   </a>
                 </div>

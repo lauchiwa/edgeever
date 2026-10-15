@@ -18,7 +18,7 @@ describe("GitHub feedback URL", () => {
       titlePrefix: "[Sync] ",
     }));
 
-    expect(url.origin + url.pathname).toBe("https://github.com/tianma-if/edgeever/issues/new");
+    expect(url.origin + url.pathname).toBe("https://github.com/lauchiwa/edgeever/issues/new");
     expect(url.searchParams.get("title")).toBe("[Sync] ");
     const body = url.searchParams.get("body");
     expect(body).toContain("## Diagnostics");

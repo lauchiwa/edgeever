@@ -52,6 +52,13 @@
 Related Issue: #<issue-number>
 ```
 
+## 二开 fork 约束（lauchiwa/edgeever）
+
+- **发布与更新**：本仓库是上游二开 fork，只发布 Windows x64 桌面版，版本号 `vX.Y.Z-rc.N`，禁止发布不带后缀的 `vX.Y.Z`。改动发布、更新或同步流程前必须阅读 [二开版发布](docs/fork-releases.zh-CN.md)（English: [Fork releases](docs/fork-releases.md)）。上文“GitHub Actions 与 Release 约束”描述的是上游官方仓库流程，不适用于本 fork 的发布。
+- **二开逻辑不得被上游覆盖**：仓库身份只改 `apps/desktop/src/main/fork-config.mjs` 及其镜像 `packages/shared/src/fork-config.ts`；同步上游只通过 `node scripts/fork-sync-upstream.mjs start vX.Y.Z` 的 `sync/*` 分支与 PR，禁止直接推送 `main`；`scripts/fork-invariants.test.mjs` 失败时修复二开逻辑，不得放宽该测试。
+- **签名私钥**：Windows 更新签名私钥只保存在维护者本机，禁止写入仓库、日志或 GitHub Secret；代理不得读取私钥或口令。
+- **Migration**：二开不新增数据库 Migration，以免与上游编号冲突。
+
 ## 环境、部署与组件约束
 
 - **Cloudflare 部署**：严格按 `docs/agent-deploy-cloudflare.md` 执行。

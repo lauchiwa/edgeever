@@ -1,3 +1,5 @@
+import { FORK_REPOSITORY, FORK_RELEASES_URL } from "./fork-config.mjs";
+
 const MAX_REQUESTS = 24;
 const ASSET_HOSTS = new Set(["release-assets.githubusercontent.com", "objects.githubusercontent.com", "github-releases.githubusercontent.com"]);
 export const sanitizeUpdateUrl = (value) => {
@@ -21,9 +23,11 @@ export const sanitizeProxyResult = (value) => String(value).split(";").slice(0, 
 const isReleaseUrl = (value) => {
   try {
     const url = new URL(value);
+    const releases = `/${FORK_REPOSITORY}/releases`;
+    const matches = (path, prefix, separators) => path === prefix || (path.startsWith(prefix) && separators.includes(path[prefix.length]));
     return url.protocol === "https:" && (
-      (url.hostname === "github.com" && /^\/tianma-if\/edgeever\/releases(?:[/.]|$)/.test(url.pathname))
-      || (url.hostname === "api.github.com" && /^\/repos\/tianma-if\/edgeever\/releases(?:\/|$)/.test(url.pathname))
+      (url.hostname === "github.com" && matches(url.pathname, releases, "/."))
+      || (url.hostname === "api.github.com" && matches(url.pathname, `/repos${releases}`, "/"))
     );
   } catch { return false; }
 };
@@ -60,7 +64,7 @@ export const createUpdateNetworkDiagnostics = ({ now = Date.now, write = () => {
     if (attached.has(ses)) return;
     attached.add(ses);
     observedSessions.push(name);
-    const filter = { urls: ["https://github.com/tianma-if/edgeever/releases*", "https://api.github.com/repos/tianma-if/edgeever/releases*", ...[...ASSET_HOSTS].map((host) => `https://${host}/*`)] };
+    const filter = { urls: [`${FORK_RELEASES_URL}*`, `https://api.github.com/repos/${FORK_REPOSITORY}/releases*`, ...[...ASSET_HOSTS].map((host) => `https://${host}/*`)] };
     const key = (id) => `${name}:${id}`;
     ses.webRequest.onBeforeRequest(filter, (details, callback) => {
       // Always release the request immediately; proxy inspection runs separately.

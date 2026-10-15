@@ -3,7 +3,8 @@ productName: EdgeEver
 executableName: EdgeEver
 publish:
   provider: github
-  owner: tianma-if
+  # Fork: updates come from this fork only (see apps/desktop/src/main/fork-config.mjs).
+  owner: lauchiwa
   repo: edgeever
   releaseType: release
 protocols:

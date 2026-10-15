@@ -53,6 +53,7 @@ import { cn } from "@/lib/utils";
 import { useShowDescendantNotesPreference } from "@/lib/descendant-notes-preference";
 import { BETA_BADGE_CLASSNAME } from "@/lib/workspace-ui";
 import type { Notebook, AuthUser, NoteCreateKind } from "@edgeever/shared";
+import { FORK_RELEASES_URL } from "@edgeever/shared";
 import type { NotebookNode, NotebookDropPosition, NotebookSortMode } from "@/lib/app-helpers";
 import type { SyncQueueSummary } from "@/lib/sync-queue";
 import {
@@ -77,7 +78,9 @@ const DesktopSyncIssuesDialog = lazy(() => import("./DesktopSyncIssuesDialog").t
 const NOTEBOOK_SIDEBAR_ID = "edgeever-notebook-sidebar";
 const NOTEBOOK_DRAG_SCROLL_EDGE_PX = 56;
 const NOTEBOOK_DRAG_SCROLL_MAX_STEP_PX = 18;
-const DESKTOP_DOWNLOAD_URL = "https://github.com/tianma-if/edgeever/releases/latest";
+// Fork: desktop builds come from the fork (pre-releases, so not /latest).
+// Android stays upstream: the fork does not publish mobile builds.
+const DESKTOP_DOWNLOAD_URL = FORK_RELEASES_URL;
 const ANDROID_PLAY_URL = "https://play.google.com/store/apps/details?id=org.edgeever.mobile";
 const ANDROID_APK_URL = "https://github.com/tianma-if/edgeever/releases/latest";
 const IOS_DOWNLOAD_URL = "https://apps.apple.com/us/app/edgeever/id6792625631";

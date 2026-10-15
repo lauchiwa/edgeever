@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { buildGitHubFeedbackUrl } from "../packages/shared/src/github-feedback";
+import { FORK_NEW_ISSUE_URL } from "../packages/shared/src/fork-config";
 
 describe("buildGitHubFeedbackUrl", () => {
   test("prefills localized feedback copy and system information", () => {
@@ -18,7 +19,7 @@ describe("buildGitHubFeedbackUrl", () => {
       })
     );
 
-    expect(`${url.origin}${url.pathname}`).toBe("https://github.com/tianma-if/edgeever/issues/new");
+    expect(`${url.origin}${url.pathname}`).toBe(FORK_NEW_ISSUE_URL);
     expect(url.searchParams.get("title")).toBe("[反馈] ");
     expect(url.searchParams.get("body")).toContain("## 反馈内容");
     expect(url.searchParams.get("body")).toContain("- 版本号: v0.5.0");

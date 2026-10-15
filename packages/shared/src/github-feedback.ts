@@ -1,4 +1,6 @@
-const GITHUB_NEW_ISSUE_URL = "https://github.com/tianma-if/edgeever/issues/new";
+import { FORK_NEW_ISSUE_URL } from "./fork-config";
+
+const GITHUB_NEW_ISSUE_URL = FORK_NEW_ISSUE_URL;
 
 export type GitHubFeedbackSystemInfoItem = {
   label: string;

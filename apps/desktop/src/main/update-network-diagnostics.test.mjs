@@ -8,7 +8,7 @@ const makeSession = (resolveProxy = async () => "DIRECT") => {
     ["onBeforeRequest", "onCompleted", "onErrorOccurred", "onBeforeRedirect"].map((name) => [name, (_filter, listener) => { handlers[name] = listener; }]),
   ) };
 };
-const start = (ses, id, url = "https://github.com/tianma-if/edgeever/releases.atom", extra = {}) => {
+const start = (ses, id, url = "https://github.com/lauchiwa/edgeever/releases.atom", extra = {}) => {
   let response;
   ses.handlers.onBeforeRequest({ id, url, ...extra }, (value) => { response = value; });
   expect(response).toEqual({});
@@ -21,12 +21,12 @@ test("records the actual failed URL, elapsed time and proxy of the updater sessi
   const diagnostics = createUpdateNetworkDiagnostics({ now: () => time, write: (_event, value) => logs.push(value) });
   diagnostics.observeSession(ses, "electron-updater");
   diagnostics.beginCheck();
-  start(ses, 7, "https://user:password@github.com/tianma-if/edgeever/releases.atom?token=private", { uploadData: ["private"], requestHeaders: { Cookie: "private" } });
+  start(ses, 7, "https://user:password@github.com/lauchiwa/edgeever/releases.atom?token=private", { uploadData: ["private"], requestHeaders: { Cookie: "private" } });
   await flush();
   time = 31000;
   ses.handlers.onErrorOccurred({ id: 7, error: "net::ERR_CONNECTION_TIMED_OUT" });
   const request = diagnostics.snapshot().requests[0];
-  expect(request).toMatchObject({ url: "https://github.com/tianma-if/edgeever/releases.atom", elapsedMs: 30000, status: "failed", errorCode: "ERR_CONNECTION_TIMED_OUT", session: "electron-updater", proxy: { state: "resolved", value: "PROXY 127.0.0.1:7890; DIRECT" } });
+  expect(request).toMatchObject({ url: "https://github.com/lauchiwa/edgeever/releases.atom", elapsedMs: 30000, status: "failed", errorCode: "ERR_CONNECTION_TIMED_OUT", session: "electron-updater", proxy: { state: "resolved", value: "PROXY 127.0.0.1:7890; DIRECT" } });
   expect(JSON.stringify(logs)).not.toMatch(/secret|password|private|Cookie|uploadData/);
 });
 
@@ -35,7 +35,7 @@ test("tracks metadata redirects and their HTTP status without recording signed U
   const diagnostics = createUpdateNetworkDiagnostics();
   diagnostics.observeSession(ses, "default-metadata");
   diagnostics.beginCheck();
-  start(ses, 1, "https://github.com/tianma-if/edgeever/releases/download/v1.111.0/latest-windows.json");
+  start(ses, 1, "https://github.com/lauchiwa/edgeever/releases/download/v1.111.0/latest-windows.json");
   ses.handlers.onBeforeRedirect({ id: 1, statusCode: 302, redirectURL: "https://release-assets.githubusercontent.com/asset/file?jwt=secret" });
   start(ses, 1, "https://release-assets.githubusercontent.com/asset/file?jwt=secret");
   ses.handlers.onCompleted({ id: 1, statusCode: 200, error: "net::OK" });
@@ -53,7 +53,7 @@ test("excludes browser/plugin traffic and requests outside an active update atte
   start(ses, 1);
   diagnostics.beginCheck();
   start(ses, 2, undefined, { webContentsId: 10 });
-  start(ses, 3, "https://github.com/tianma-if/edgeever-tasks/releases/latest");
+  start(ses, 3, "https://github.com/lauchiwa/edgeever-tasks/releases/latest");
   start(ses, 4, "https://release-assets.githubusercontent.com/unrelated/asset");
   diagnostics.stop();
   start(ses, 5);

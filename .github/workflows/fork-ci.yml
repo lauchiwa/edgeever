@@ -1,0 +1,99 @@
+name: Fork CI
+
+# CI for this fork (lauchiwa/edgeever). Upstream's own workflows are gated to
+# tianma-if/edgeever and never run here, so without this file the fork has no
+# checks at all. Every pull request into main, including upstream sync PRs
+# (sync/vX.Y.Z), must pass it. See docs/fork-releases.md.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    if: github.repository == 'lauchiwa/edgeever'
+    name: Fork invariants, type check and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - name: Install dependencies
+        run: |
+          for attempt in 1 2 3; do
+            bun install --frozen-lockfile && exit 0
+            [ "$attempt" = "3" ] && exit 1
+            sleep "$((15 * attempt))"
+          done
+      # First: a clean upstream merge that silently undoes the fork fails here.
+      - name: Fork invariants
+        run: bun test scripts/fork-invariants.test.mjs
+      - name: Fork tooling and Windows update trust
+        run: >-
+          bun test scripts/fork-release-version.test.mjs scripts/fork-sync-upstream.test.mjs
+          scripts/fork-sign-release.test.mjs scripts/fork-generate-update-keys.test.mjs
+          scripts/fork-workflows.test.mjs scripts/windows-update-metadata.test.mjs
+          apps/desktop/src/main/windows-update-trust.test.mjs
+      - run: bun run typecheck
+      - run: bun run typecheck:mobile
+      - run: bun run build:web
+
+  regression:
+    if: github.repository == 'lauchiwa/edgeever'
+    name: Regression tests (non-E2E)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - name: Install dependencies
+        run: |
+          for attempt in 1 2 3; do
+            bun install --frozen-lockfile && exit 0
+            [ "$attempt" = "3" ] && exit 1
+            sleep "$((15 * attempt))"
+          done
+      - run: bun run test
+
+  windows:
+    if: github.repository == 'lauchiwa/edgeever'
+    name: Windows desktop tests
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            bun install --frozen-lockfile
+            if ($LASTEXITCODE -eq 0) { exit 0 }
+            if ($attempt -eq 3) { exit $LASTEXITCODE }
+            Start-Sleep -Seconds (15 * $attempt)
+          }
+      # Windows-only behaviour this fork fixed: npm .cmd launchers, process-tree
+      # stop, busy-directory cleanup and the Windows update trust gate.
+      - name: ACP and Windows update tests
+        run: >-
+          bun test --cwd apps/desktop src/main/acp-host.test.mjs src/main/acp-host-native.test.mjs
+          src/main/acp-windows-command.test.mjs src/main/acp-process-lifecycle.test.mjs
+          src/main/acp-adapter-manager.test.mjs src/main/claude-acp-compat.test.mjs
+          src/main/windows-update-trust.test.mjs
+      - name: Fork invariants on Windows paths
+        run: bun test scripts/fork-invariants.test.mjs scripts/windows-update-metadata.test.mjs scripts/fork-sign-release.test.mjs
