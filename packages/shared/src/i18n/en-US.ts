@@ -1685,6 +1685,7 @@ export const enUS = {
       localLoginRequired: "This local agent needs sign-in. Sign in under Settings → Models & Agents, then try again.",
       workbuddyLoginRequired: "WorkBuddy ACP could not use a saved sign-in. Choose an ACP sign-in method under Settings → Models & Agents, then try again.",
       agentRefused: "The local agent refused this request. Check its sign-in status or model settings, then try again.",
+      agentEmptyReply: "The local agent returned an empty reply. This usually means its model service failed or cut the reply short. Check the agent's model settings, then try again.",
       unavailable: "Sign in to a personal account to send. Demo mode and signed-out sessions cannot use the built-in assistant.",
       proposalConfirm: "Apply to note",
       proposalReject: "Don't apply",

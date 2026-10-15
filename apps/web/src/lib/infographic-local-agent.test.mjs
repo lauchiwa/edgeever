@@ -95,4 +95,5 @@ test("infographic requests use the same note access errors without blaming the a
   expect(infographicLocalAgentErrorKey("note_access_network", "workbuddyIntl")).toBe("aiAssistant.sidebar.noteAccessNetwork");
   expect(infographicLocalAgentErrorKey("note_access_login_required", "workbuddyIntl")).toBe("aiAssistant.sidebar.noteAccessLoginRequired");
   expect(infographicLocalAgentErrorKey("note_access_changed", "codex")).toBe("aiAssistant.sidebar.noteAccessChanged");
+  expect(infographicLocalAgentErrorKey("agent_empty_reply", "piAgent")).toBe("aiAssistant.sidebar.agentEmptyReply");
 });

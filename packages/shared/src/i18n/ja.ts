@@ -1674,6 +1674,7 @@ export const ja = {
       localLoginRequired: "ローカル Agent へのログインが必要です。「設定 → モデルとエージェント」でログインしてから再試行してください。",
       workbuddyLoginRequired: "WorkBuddy ACP は保存済みのログインを利用できませんでした。「設定 → モデルとエージェント」で ACP のログイン方法を選び、再試行してください。",
       agentRefused: "ローカル Agent がこのリクエストを拒否しました。ログイン状態またはモデル設定を確認して再試行してください。",
+      agentEmptyReply: "ローカル Agent が空の応答を返しました。通常はモデルサービスの障害か応答の途中切断が原因です。Agent のモデル設定を確認して再試行してください。",
       unavailable: "送信するには個人アカウントでサインインしてください。デモモードや未ログインでは内蔵アシスタントを使えません。",
       proposalConfirm: "ノートに適用",
       proposalReject: "適用しない",

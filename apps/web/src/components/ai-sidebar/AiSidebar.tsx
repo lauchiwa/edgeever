@@ -1010,7 +1010,8 @@ function AiSidebarSession({
           : event.message === "needs_login" && localAdapterId === "claudeCode" ? t("aiAssistant.agentSource.claudeCodeLoginHint")
           : event.message === "needs_login" ? t(localAdapterId === "workbuddyCn" || localAdapterId === "workbuddyIntl"
             ? "aiAssistant.sidebar.workbuddyLoginRequired" : "aiAssistant.sidebar.localLoginRequired")
-            : event.message === "agent_refused" ? t("aiAssistant.sidebar.agentRefused") : event.message);
+            : event.message === "agent_refused" ? t("aiAssistant.sidebar.agentRefused")
+            : event.message === "agent_empty_reply" ? t("aiAssistant.sidebar.agentEmptyReply") : event.message);
       }
       if (active.current?.requestId === event.requestId) {
         active.current = null;

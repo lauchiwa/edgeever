@@ -111,6 +111,7 @@ export const infographicLocalAgentErrorKey = (message: string, adapterId: string
       : "aiAssistant.sidebar.localLoginRequired";
   }
   if (message === "agent_refused") return "aiAssistant.sidebar.agentRefused";
+  if (message === "agent_empty_reply") return "aiAssistant.sidebar.agentEmptyReply";
   const noteAccessErrorKey = desktopAcpNoteAccessErrorKey(message);
   if (noteAccessErrorKey) return noteAccessErrorKey;
   if (message === "not_installed" || message === "desktop_acp_unavailable") return "aiAssistant.sidebar.localMissing";
