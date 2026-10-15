@@ -34,6 +34,17 @@ describe("fork workflows", () => {
     expect(text).toContain('EDGE_EVER_FORK_RELEASE: "1"');
   });
 
+  // The gates assert that main carries the bare upstream version, so they must
+  // run on the tagged source before the rc version is written into it.
+  test("the release gates run before the release version is applied, and both before the build", () => {
+    const text = workflow("fork-release.yml");
+    const step = (name) => text.search(new RegExp(`^\\s*- name: ${name}\\s*$`, "m"));
+    const [gates, apply, build] = ["Release gates", "Apply the release version", "Build Web renderer"].map(step);
+    expect(Math.min(gates, apply, build)).toBeGreaterThan(-1);
+    expect(gates).toBeLessThan(apply);
+    expect(apply).toBeLessThan(build);
+  });
+
   test("CI and the watcher are read-only", () => {
     for (const name of ["fork-ci.yml", "fork-upstream-watch.yml"]) {
       expect(workflow(name)).toMatch(/permissions:\s*\n\s*contents: read\s*\n/);
