@@ -13,7 +13,9 @@ import { fileURLToPath } from "node:url";
 import { FORK_VERSION_PATTERN } from "../apps/desktop/src/main/fork-config.mjs";
 
 const BASE = /^(\d+)\.(\d+)\.(\d+)$/;
-export const VERSIONED_PACKAGES = ["package.json", "apps/desktop/package.json"];
+// release-summary.json: the Web build requires its version to equal package.json
+// (apps/web/vite.config.ts). Its notes stay upstream's for the base version.
+export const VERSIONED_PACKAGES = ["package.json", "apps/desktop/package.json", "release-summary.json"];
 
 export const parseForkTag = (tag) => {
   const version = String(tag ?? "").replace(/^v/, "");

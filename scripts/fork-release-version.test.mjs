@@ -31,13 +31,15 @@ describe("fork release versions", () => {
     const root = await mkdtemp(join(tmpdir(), "edgeever-fork-version-"));
     try {
       await mkdir(join(root, "apps", "desktop"), { recursive: true });
-      for (const file of ["package.json", "apps/desktop/package.json"]) {
+      for (const file of ["package.json", "apps/desktop/package.json", "release-summary.json"]) {
         await writeFile(join(root, file), `{\n  "name": "x",\n  "version": "1.119.0",\n  "private": true\n}\n`);
       }
       expect(() => applyForkVersion("v1.120.0-rc.0", { root })).toThrow("must be built from upstream base");
       expect(applyForkVersion("v1.119.0-rc.1", { root })).toBe("1.119.0-rc.1");
-      expect(await readFile(join(root, "apps/desktop/package.json"), "utf8"))
-        .toBe(`{\n  "name": "x",\n  "version": "1.119.0-rc.1",\n  "private": true\n}\n`);
+      for (const file of ["package.json", "apps/desktop/package.json", "release-summary.json"]) {
+        expect(await readFile(join(root, file), "utf8"))
+          .toBe(`{\n  "name": "x",\n  "version": "1.119.0-rc.1",\n  "private": true\n}\n`);
+      }
     } finally {
       await rm(root, { recursive: true, force: true });
     }
