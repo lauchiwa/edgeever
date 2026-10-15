@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { FORK_WINDOWS_UPDATE_KEYS } from "../apps/desktop/src/main/fork-config.mjs";
 import { createWindowsUpdateMetadata } from "./create-windows-update-metadata.mjs";
-import { releaseAssetNames, signAndPublishRelease } from "./fork-sign-release.mjs";
+import { SIGNING_PASSPHRASE_ENV, releaseAssetNames, resolveSigningPassphrase, signAndPublishRelease } from "./fork-sign-release.mjs";
 
 const TAG = "v1.119.0-rc.0";
 const VERSION = "1.119.0-rc.0";
@@ -115,5 +115,19 @@ describe("fork release signing", () => {
     await expect(signAndPublishRelease(options(fakeGitHub(release), { privateKeyPath: keys.backupPath, publish: true })))
       .rejects.toThrow("key metadata is invalid");
     expect(release.draft).toBe(true);
+  });
+});
+
+describe("signing passphrase source", () => {
+  const prompt = async () => "typed";
+
+  test("GitHub Actions reads it from the Environment secret and fails clearly without it", async () => {
+    expect(await resolveSigningPassphrase({ env: { GITHUB_ACTIONS: "true", [SIGNING_PASSPHRASE_ENV]: "from-secret" }, prompt })).toBe("from-secret");
+    await expect(resolveSigningPassphrase({ env: { GITHUB_ACTIONS: "true" }, prompt })).rejects.toThrow("fork-release environment");
+  });
+
+  test("locally it is always prompted for, and a passphrase left in the environment is refused", async () => {
+    expect(await resolveSigningPassphrase({ env: {}, prompt })).toBe("typed");
+    await expect(resolveSigningPassphrase({ env: { [SIGNING_PASSPHRASE_ENV]: "leaked" }, prompt })).rejects.toThrow("only read in GitHub Actions");
   });
 });

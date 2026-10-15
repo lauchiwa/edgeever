@@ -1,5 +1,6 @@
-// Guards the fork's workflows: they run only in the fork, the release never
-// signs in CI, and upstream's snapshot sync stays out of the fork's own files.
+// Guards the fork's workflows: they run only in the fork, only the release's
+// publish job can reach the signing key, and upstream's snapshot sync stays
+// out of the fork's own files.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
@@ -21,11 +22,55 @@ describe("fork workflows", () => {
     }
   });
 
-  test("the release workflow never sees the signing key and only builds rc tags", () => {
+  // Each top-level job of a workflow, by id.
+  const jobsOf = (text) => {
+    const block = text.slice(text.search(/^jobs:\s*$/m));
+    const starts = [...block.matchAll(/^  ([\w-]+):\s*$/gm)];
+    return Object.fromEntries(starts.map((match, index) => [match[1], block.slice(match.index, starts[index + 1]?.index)]));
+  };
+
+  test("only the publish job can reach the signing key, and it runs nothing it installs", () => {
     const text = workflow("fork-release.yml");
-    expect(text).not.toMatch(/secrets\./);
-    expect(text).not.toMatch(/SIGNING_KEY\s*:/);
-    expect(text).not.toMatch(/sign-windows-update-manifest|fork-sign-release\.mjs v[^X]/);
+    const { windows, publish, ...others } = jobsOf(text);
+    expect(Object.keys(others)).toEqual([]);
+    // Nothing outside the jobs (workflow env, defaults) may carry a secret.
+    expect(text.slice(0, text.search(/^jobs:\s*$/m))).not.toMatch(/secrets\./);
+
+    expect(windows).not.toMatch(/secrets\.|environment:|SIGNING/);
+    expect(windows).not.toContain("fork-sign-release");
+
+    expect(publish).toMatch(/^    environment: fork-release\s*$/m);
+    expect(publish).toMatch(/^    needs: windows\s*$/m);
+    expect([...publish.matchAll(/secrets\.(\w+)/g)].map((match) => match[1]).sort())
+      .toEqual(["FORK_WINDOWS_UPDATE_SIGNING_KEY", "FORK_WINDOWS_UPDATE_SIGNING_PASSPHRASE"]);
+    expect(publish).not.toMatch(/bun |npm |npx |pnpm |yarn |setup-bun|cache:/);
+    expect(publish).toContain("ref: ${{ github.sha }}");
+    expect(publish).toContain("persist-credentials: false");
+    expect(publish).toContain("umask 077");
+    expect(publish).toMatch(/trap 'rm -f "\$\{key\}"' EXIT/);
+    expect(publish).toContain('node scripts/fork-sign-release.mjs "${TAG}" --publish');
+  });
+
+  // The publish job installs nothing, so the signing script must only import
+  // Node built-ins and repository files (no npm package can reach the key).
+  test("the signing script only imports Node built-ins and repository files", () => {
+    const seen = new Set();
+    const visit = (file) => {
+      if (seen.has(file)) return;
+      seen.add(file);
+      const source = readFileSync(file, "utf8");
+      for (const [, specifier] of source.matchAll(/^\s*(?:import|export)\s[^;]*?from\s+"([^"]+)"/gm)) {
+        if (specifier.startsWith("node:")) continue;
+        expect(specifier).toMatch(/^\.\.?\//);
+        visit(join(file, "..", specifier));
+      }
+    };
+    visit(join(root, "scripts", "fork-sign-release.mjs"));
+    expect(seen.size).toBeGreaterThan(5);
+  });
+
+  test("the release workflow only builds rc tags and only from main", () => {
+    const text = workflow("fork-release.yml");
     expect(text).toMatch(/tags:\s*\n\s*- "v\*-rc\.\*"/);
     expect(text).toContain("--draft --prerelease");
     expect(text).toContain("--publish never");
