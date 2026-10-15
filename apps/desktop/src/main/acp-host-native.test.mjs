@@ -1,9 +1,9 @@
 import { expect, test } from "bun:test";
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { createAcpHostRuntime } from "./acp-host.mjs";
+import { createAcpHostRuntime, handshakeTimeoutFor } from "./acp-host.mjs";
 import { createAcpAdapterManager } from "./acp-adapter-manager.mjs";
 
 const fixture = (failure = null) => `
@@ -88,3 +88,27 @@ test("native install/update validation preserves the old manifest on failure and
     expect((await restarted.probeAdapter({ id: "codex" })).state).toBe("available");
   });
 }, 20000);
+
+test("Claude Code gets a longer connection budget; other adapters and explicit overrides are unchanged", () => {
+  expect(handshakeTimeoutFor("claudeCode")).toBe(60_000);
+  for (const id of ["codex", "piAgent", "workbuddyCn", "unknown"]) expect(handshakeTimeoutFor(id)).toBe(20_000);
+  expect(handshakeTimeoutFor("claudeCode", 1_500)).toBe(1_500);
+  expect(handshakeTimeoutFor("codex", 1_500)).toBe(1_500);
+});
+
+test("every connection attempt passes an explicit timeout", async () => {
+  // withHandshakeTimeout has no default: a call without one would abort at once.
+  const source = await readFile(new URL("./acp-host.mjs", import.meta.url), "utf8");
+  const calls = source.split("await withHandshakeTimeout(").slice(1);
+  expect(calls.length).toBe(5);
+  for (const call of calls) {
+    let depth = 1;
+    let end = 0;
+    while (depth > 0 && end < call.length) {
+      const char = call[end++];
+      if (char === "(") depth++;
+      else if (char === ")") depth--;
+    }
+    expect(call.slice(0, end - 1)).toMatch(/,\s*(adapterTimeout\([^)]*\)|authenticationTimeoutMs|\d[\d_]*)\s*$/);
+  }
+});
