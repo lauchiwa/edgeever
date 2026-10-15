@@ -36,6 +36,10 @@ const setup = async ({ conflicting }) => {
   const local = join(root, "local");
   sh(root, "clone", "-q", join(root, "origin.git"), local);
   sh(local, "config", "core.autocrlf", "false");
+  // The script's own merge commit runs through gitRunner without the test env;
+  // CI runners have no global identity, so give the clone its own.
+  sh(local, "config", "user.name", identity.GIT_AUTHOR_NAME);
+  sh(local, "config", "user.email", identity.GIT_AUTHOR_EMAIL);
   await commitFile(local, "config.txt", "repo=lauchiwa\n", "fork: point at the fork");
   sh(local, "push", "-q", "origin", "main");
   if (conflicting) await commitFile(upstream, "config.txt", "repo=tianma-if\nchannel=latest\n", "upstream changes config");
@@ -76,6 +80,19 @@ describe("fork upstream sync", () => {
     expect(result).toMatchObject({ result: "conflicts", conflicts: ["config.txt"] });
     expect(sh(local, "rev-parse", "-q", "--verify", "MERGE_HEAD")).toMatch(/^[0-9a-f]{40}$/);
     expect(sh(local, "rev-parse", "main")).toBe(sh(local, "rev-parse", "origin/main"));
+  }, GIT_TIMEOUT);
+
+  test("reports a failed merge that is not a conflict instead of calling it one", async () => {
+    const { upstream, local } = await setup({ conflicting: false });
+    const real = gitRunner(local);
+    // Simulates e.g. a missing git identity: the merge fails, nothing is unmerged.
+    // Mirrors gitRunner: allowFailure returns null instead of throwing.
+    const git = (args, options = {}) => {
+      if (args[0] !== "merge") return real(args, options);
+      if (options.allowFailure) return null;
+      throw new Error("git merge failed: Committer identity unknown");
+    };
+    expect(() => startSync({ git, tag: "v1.1.0", upstreamUrl: upstream })).toThrow("Committer identity unknown");
   }, GIT_TIMEOUT);
 
   test("reports an already merged release without creating a branch", async () => {

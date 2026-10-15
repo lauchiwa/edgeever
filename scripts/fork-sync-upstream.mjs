@@ -59,10 +59,13 @@ export const startSync = ({ git, tag, upstreamUrl = UPSTREAM_URL, base = "origin
     throw new Error(`Branch ${status.branch} already exists; continue there or delete it first`);
   }
   git(["switch", "-c", status.branch, base]);
-  const merged = git(["merge", "--no-ff", "--no-edit", "-m", `Merge upstream EdgeEver ${tag} into ${status.branch}`,
-    UPSTREAM_TAG_REF(tag)], { allowFailure: true });
-  if (merged === null) {
+  try {
+    git(["merge", "--no-ff", "--no-edit", "-m", `Merge upstream EdgeEver ${tag} into ${status.branch}`, UPSTREAM_TAG_REF(tag)]);
+  } catch (error) {
     const conflicts = (git(["diff", "--name-only", "--diff-filter=U"]) || "").split(/\r?\n/).filter(Boolean);
+    // Only real conflicts are left for manual resolution. Anything else (for
+    // example a missing git identity) is reported as git reported it.
+    if (conflicts.length === 0) throw error;
     return { ...status, result: "conflicts", conflicts };
   }
   return { ...status, result: "merged" };

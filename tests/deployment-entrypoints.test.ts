@@ -501,7 +501,10 @@ describe("Cloudflare deployment entrypoints", () => {
     const workflowsDirectory = resolve(repositoryRoot, ".github/workflows");
     const workflowFiles = readdirSync(workflowsDirectory)
       .filter((file) => /\.ya?ml$/.test(file))
-      .filter((file) => file !== "sync-edgeever-upstream.yml");
+      .filter((file) => file !== "sync-edgeever-upstream.yml")
+      // Fork (lauchiwa/edgeever): fork-*.yml are this fork's own workflows and are
+      // gated to the fork instead; scripts/fork-workflows.test.mjs checks them.
+      .filter((file) => !file.startsWith("fork-"));
 
     for (const file of workflowFiles) {
       const workflow = readRepositoryFile(`.github/workflows/${file}`);

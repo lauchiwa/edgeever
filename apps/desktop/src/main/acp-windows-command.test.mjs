@@ -16,8 +16,10 @@ async function withPrefix(run) {
 async function writeShim(prefix, name, target = `node_modules/${name}/dist/index.js`) {
   const entry = path.resolve(prefix, target);
   await mkdir(path.dirname(entry), { recursive: true });
-  await writeFile(entry, "process.stdout.write('fixture');\n");
-  await writeFile(path.join(prefix, `${name}.cmd`), `@ECHO off\r\n@\"%~dp0\\node.exe\" \"%~dp0\\${target.replace(/\//g, "\\")}\" %*\r\n`);
+  // Executable mode: these Windows-semantics tests also run on Linux CI, where
+  // the X_OK check needs it (Windows ignores the bits).
+  await writeFile(entry, "process.stdout.write('fixture');\n", { mode: 0o755 });
+  await writeFile(path.join(prefix, `${name}.cmd`), `@ECHO off\r\n@\"%~dp0\\node.exe\" \"%~dp0\\${target.replace(/\//g, "\\")}\" %*\r\n`, { mode: 0o755 });
   return realpathSync(entry);
 }
 
@@ -61,7 +63,7 @@ test("prefers native executables when both native and npm launchers are present"
   await withPrefix(async ({ prefix, deps }) => {
     await writeShim(prefix, "pi");
     await writeShim(prefix, "pi-acp");
-    await writeFile(path.join(prefix, "pi-acp.exe"), "native-fixture");
+    await writeFile(path.join(prefix, "pi-acp.exe"), "native-fixture", { mode: 0o755 });
     expect(resolveAcpCommand({ id: "piAgent" }, deps).command).toEqual({
       command: realpathSync(path.join(prefix, "pi-acp.exe")), args: [],
     });
@@ -71,6 +73,8 @@ test("prefers native executables when both native and npm launchers are present"
 test("rejects arbitrary batch scripts, escaping targets, missing targets and non-JS shims", async () => {
   await withPrefix(async ({ prefix, deps }) => {
     const launcher = path.join(prefix, "pi.cmd");
+    // Executable, so each case is rejected by the shim checks, not by X_OK on Linux.
+    await writeFile(launcher, "", { mode: 0o755 });
     for (const target of ["../outside.js", "node_modules/pkg/../../outside.js", "node_modules/%INJECT%/main.js", "node_modules/pkg/main.py"]) {
       await writeFile(launcher, `@node \"%~dp0\\${target.replace(/\//g, "\\")}\" %*\r\n`);
       expect(resolveAcpCommand({ id: "piAgent" }, deps).state).toBe("not_installed");
