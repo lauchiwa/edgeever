@@ -36,7 +36,14 @@ vX.Y.Z-rc.N
 ## 签名密钥
 
 - 两把 Ed25519 密钥：**主密钥**用于签名发布；**备用密钥**冷存储，只在主密钥丢失或泄露时，用于签发一次密钥轮换更新。两把公钥都固定在 `fork-config.mjs` 中，指纹固定在不变量测试中。
-- 私钥是用口令加密的 PKCS#8 文件，存放在仓库外，由 `scripts/fork-generate-update-keys.mjs` 生成。私钥**从不进入 GitHub**（不使用 Actions Secret），因此即使工作流或令牌被入侵，也无法签发客户端会接受的更新。
+- 私钥是用口令加密的 PKCS#8 文件，存放在仓库外，由 `scripts/fork-generate-update-keys.mjs` 生成。
+- 为了无需手动步骤即可发布，**主密钥**及其口令保存为 GitHub Environment `fork-release` 的 Secret。只有发布工作流的 `publish` 任务能读取它们；该任务不安装任何依赖，只运行仓库内无依赖的脚本。代价是：**控制了本 GitHub 账号或某次发布运行的人，可以签发已安装客户端会接受的更新。**备用密钥从不进入 GitHub，所以主密钥泄露后，仍可在本机用备用密钥签发一次密钥轮换更新。
+- 由你本人在 Windows Terminal 中设置或替换这两个 Secret（`cmd` 重定向让私钥不经过 shell，口令为隐藏输入）：
+
+  ```powershell
+  cmd /c "gh secret set FORK_WINDOWS_UPDATE_SIGNING_KEY --env fork-release -R lauchiwa/edgeever < %USERPROFILE%\.config\edgeever-fork\windows-update-ed25519-primary.pem"
+  gh secret set FORK_WINDOWS_UPDATE_SIGNING_PASSPHRASE --env fork-release -R lauchiwa/edgeever
+  ```
 - **两把私钥都丢失时，已安装的客户端将无法再自动更新，只能手动重装。**请在密码管理器或加密的离线存储中备份。
 
 ## 同步上游版本
@@ -73,15 +80,17 @@ vX.Y.Z-rc.N
    git tag v1.119.0-rc.0 && git push origin v1.119.0-rc.0
    ```
 
-2. `fork-release.yml` 会检查 tag 是否位于 `main` 上，写入版本号，运行发布检查（包括两把公钥都已固定），构建并试启动 Windows 应用，然后上传一个 **Draft** 预发布版本，包含安装包、`rc.yml`、`latest-windows.json` 和 `SHA256SUMS-windows.txt`。**它从不签名。**
-3. 在本机签名并发布（使用 PowerShell 或 Windows Terminal，不要用 Git Bash）：
+2. 其余步骤由 `fork-release.yml` 自动完成，无需手动操作：
+   - `windows` 任务检查 tag 是否位于 `main` 上，运行发布检查（包括两把公钥都已固定），写入版本号，构建并试启动 Windows 应用，然后上传一个 **Draft** 预发布版本，包含安装包、`rc.yml`、`latest-windows.json` 和 `SHA256SUMS-windows.txt`。
+   - `publish` 任务签名 `latest-windows.json`，上传签名，重新下载全部 5 个资产，按客户端的方式完整校验，校验通过后才发布。
+
+   客户端看不到 Draft，所以失败后可以安全重试：修复原因后，用同一个 tag 手动运行工作流（Actions → Fork release → 在 `main` 上 Run workflow）。
+3. 本机兜底方式，例如 Environment Secret 不可用时（使用 PowerShell 或 Windows Terminal，不要用 Git Bash；口令会提示输入）：
 
    ```powershell
    $env:EDGE_EVER_WINDOWS_UPDATE_SIGNING_KEY = "$HOME\.config\edgeever-fork\windows-update-ed25519-primary.pem"
    node scripts/fork-sign-release.mjs v1.119.0-rc.0 --publish
    ```
-
-   它会签名 `latest-windows.json`，上传签名，重新下载全部 5 个资产，按客户端的方式完整校验，校验通过后才发布。不加 `--publish` 时，只签名和校验，保留为 Draft。客户端看不到 Draft，所以任何失败都可以安全重试。
 
 基线版本打错的 tag 不需要删除，发布一个正确且更高的 tag 即可。**不要删除或重新签名已发布的版本。**
 

@@ -1,6 +1,6 @@
 // Signs and publishes a fork release prepared as a Draft by
-// .github/workflows/fork-release.yml. Runs on the maintainer's machine only:
-// the private key and its passphrase never reach GitHub Actions.
+// .github/workflows/fork-release.yml. Its publish job runs it with the primary
+// key from the fork-release Environment; it also runs locally as a fallback.
 //
 //   $env:EDGE_EVER_WINDOWS_UPDATE_SIGNING_KEY = "$HOME\.config\edgeever-fork\windows-update-ed25519-primary.pem"
 //   node scripts/fork-sign-release.mjs v1.119.0-rc.0             sign + audit, leave as Draft
@@ -113,6 +113,20 @@ export const signAndPublishRelease = async ({
   }
 };
 
+export const SIGNING_PASSPHRASE_ENV = "EDGE_EVER_WINDOWS_UPDATE_SIGNING_PASSPHRASE";
+
+// The passphrase comes from the environment only inside GitHub Actions, where
+// it is an Environment secret that never touches disk or logs. Anywhere else
+// it is prompted for, so it never ends up in a shell profile or history.
+export const resolveSigningPassphrase = async ({ env = process.env, prompt = promptHidden } = {}) => {
+  if (env.GITHUB_ACTIONS === "true") {
+    if (!env[SIGNING_PASSPHRASE_ENV]) throw new Error(`${SIGNING_PASSPHRASE_ENV} is not set; add it to the fork-release environment`);
+    return env[SIGNING_PASSPHRASE_ENV];
+  }
+  if (env[SIGNING_PASSPHRASE_ENV]) throw new Error(`${SIGNING_PASSPHRASE_ENV} is only read in GitHub Actions; unset it and enter the passphrase when asked`);
+  return prompt("Signing key passphrase: ");
+};
+
 const run = async () => {
   const args = process.argv.slice(2);
   const tag = args.find((value) => !value.startsWith("--"));
@@ -123,9 +137,9 @@ const run = async () => {
   const release = gh.release(tag);
   const needsKey = !release?.assets?.includes(WINDOWS_UPDATE_SIGNATURE_NAME) || resign;
   const privateKeyPath = process.env.EDGE_EVER_WINDOWS_UPDATE_SIGNING_KEY;
-  if (needsKey && !privateKeyPath) throw new Error("Set EDGE_EVER_WINDOWS_UPDATE_SIGNING_KEY to the offline primary key file");
+  if (needsKey && !privateKeyPath) throw new Error("Set EDGE_EVER_WINDOWS_UPDATE_SIGNING_KEY to the primary key file");
   const passphrase = needsKey && readFileSync(privateKeyPath, "utf8").includes("BEGIN ENCRYPTED PRIVATE KEY")
-    ? await promptHidden("Signing key passphrase: ")
+    ? await resolveSigningPassphrase()
     : undefined;
   const result = await signAndPublishRelease({ tag, gh, privateKeyPath, passphrase, publish, resign });
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);

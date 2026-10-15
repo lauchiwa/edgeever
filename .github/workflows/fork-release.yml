@@ -1,14 +1,17 @@
 name: Fork release (Windows)
 
-# Builds this fork's Windows release and leaves it as a Draft pre-release in
-# this repository. Pushing a tag vX.Y.Z-rc.N runs it (see docs/fork-releases.md).
+# Builds, signs and publishes this fork's Windows release. Pushing a tag
+# vX.Y.Z-rc.N runs it end to end (see docs/fork-releases.md).
 #
-# It never signs: the Ed25519 private key stays on the maintainer's machine,
-# so a compromised workflow, action or token cannot produce an update that
-# installed clients accept. The maintainer finishes the release locally:
-#   node scripts/fork-sign-release.mjs vX.Y.Z-rc.N --publish
-# which signs latest-windows.json, re-downloads and audits all assets, then
-# publishes. Drafts are invisible to the updater.
+# - windows: builds and verifies the app and uploads an unsigned Draft
+#   pre-release. It has no access to the signing key, so the build tools and
+#   npm dependencies it runs never see it.
+# - publish: the only job in the fork-release Environment, which holds the
+#   primary key. It installs nothing and runs only the repository's
+#   dependency-free scripts from the workflow commit: it signs
+#   latest-windows.json, re-downloads and audits all assets exactly as a
+#   client would, then publishes. Any failure leaves a Draft, which the
+#   updater never sees. The cold backup key never enters GitHub.
 on:
   push:
     tags:
@@ -16,7 +19,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing tag vX.Y.Z-rc.N to rebuild into its Draft
+        description: Existing unpublished tag vX.Y.Z-rc.N to rebuild, sign and publish
         required: true
 
 permissions:
@@ -140,11 +143,45 @@ jobs:
               --verify-tag --title "EdgeEver ${version}" --notes "${notes}"
           fi
           gh release upload "${TAG}" -R "${GITHUB_REPOSITORY}" "${stage}"/*
+
+  publish:
+    if: github.repository == 'lauchiwa/edgeever'
+    name: Sign, audit and publish
+    needs: windows
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: fork-release
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      # The signing tools come from the workflow commit (the tag itself, or
+      # main for a manual run), never from an arbitrary input ref.
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - name: Sign, audit and publish
+        shell: bash
+        env:
+          SIGNING_KEY_PEM: ${{ secrets.FORK_WINDOWS_UPDATE_SIGNING_KEY }}
+          EDGE_EVER_WINDOWS_UPDATE_SIGNING_PASSPHRASE: ${{ secrets.FORK_WINDOWS_UPDATE_SIGNING_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${SIGNING_KEY_PEM}" ]]; then
+            echo "::error::Add the FORK_WINDOWS_UPDATE_SIGNING_KEY secret to the fork-release environment (docs/fork-releases.md)."; exit 1
+          fi
+          key="${RUNNER_TEMP}/windows-update-signing-key.pem"
+          trap 'rm -f "${key}"' EXIT
+          (umask 077; printf '%s\n' "${SIGNING_KEY_PEM}" > "${key}")
+          EDGE_EVER_WINDOWS_UPDATE_SIGNING_KEY="${key}" node scripts/fork-sign-release.mjs "${TAG}" --publish
           {
-            echo "### Draft ${TAG} is ready to sign"
+            echo "### Published ${TAG}"
             echo
-            echo '```powershell'
-            echo '$env:EDGE_EVER_WINDOWS_UPDATE_SIGNING_KEY = "$HOME\.config\edgeever-fork\windows-update-ed25519-primary.pem"'
-            echo "node scripts/fork-sign-release.mjs ${TAG} --publish"
-            echo '```'
+            echo "Signed, audited from a fresh download and published as a pre-release."
           } >> "${GITHUB_STEP_SUMMARY}"
