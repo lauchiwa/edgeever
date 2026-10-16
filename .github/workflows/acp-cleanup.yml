@@ -1,0 +1,47 @@
+name: Test ACP cleanup
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "apps/desktop/src/main/acp-*.mjs"
+      - "apps/desktop/src/main/child-process-start.mjs"
+      - "scripts/verify-codex-acp-cleanup.mjs"
+      - ".github/workflows/acp-cleanup.yml"
+      - "package.json"
+      - "bun.lock"
+  push:
+    branches: [main]
+    paths:
+      - "apps/desktop/src/main/acp-*.mjs"
+      - "apps/desktop/src/main/child-process-start.mjs"
+      - "scripts/verify-codex-acp-cleanup.mjs"
+      - ".github/workflows/acp-cleanup.yml"
+      - "package.json"
+      - "bun.lock"
+
+permissions:
+  contents: read
+
+jobs:
+  cleanup:
+    if: github.repository == 'tianma-if/edgeever'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: bun install --frozen-lockfile
+      - name: Test process closure and Windows cwd locks
+        run: bun test --cwd apps/desktop src/main/acp-cleanup.test.mjs
+      - name: Install official Codex ACP fixture
+        run: npm install --prefix "${{ runner.temp }}/edgeever-codex-acp" --ignore-scripts --no-audit --no-fund --package-lock=false @agentclientprotocol/codex-acp@2.2.1
+      - name: Verify official Codex ACP process cleanup
+        run: node scripts/verify-codex-acp-cleanup.mjs "${{ runner.temp }}/edgeever-codex-acp/node_modules/@agentclientprotocol/codex-acp/dist/index.js"

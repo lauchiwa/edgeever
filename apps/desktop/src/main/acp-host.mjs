@@ -13,7 +13,7 @@ import { createAcpAdapterManager, npmAdapterCommand } from "./acp-adapter-manage
 import { startAcpMcpBridge } from "./acp-mcp-bridge.mjs";
 import { withAntigravityMacProxy } from "./antigravity-proxy.mjs";
 import readCmdShim from "read-cmd-shim";
-import { stopAcpChild, stopAcpChildSync } from "./acp-process-lifecycle.mjs";
+import { stopAcpChild, stopAcpChildSync, trackAcpChildClosure } from "./acp-process-lifecycle.mjs";
 import { authenticateWorkBuddy, prepareWorkBuddyAuth } from "./workbuddy-auth.mjs";
 
 const ADAPTERS = {
@@ -51,6 +51,8 @@ const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif
 const liveChildren = new Set();
 let exitHooked = false;
 
+export { stopAcpChild };
+
 const clientVersion = () => {
   try {
     const version = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")).version;
@@ -63,6 +65,7 @@ const clientVersion = () => {
 const trackChild = (child) => {
   if (!child) return;
   liveChildren.add(child);
+  trackAcpChildClosure(child);
   child.once?.("exit", () => liveChildren.delete(child));
   if (!exitHooked) {
     exitHooked = true;
@@ -639,7 +642,7 @@ export async function removeAcpWorkspace(directory, rmImpl = rm, { schedule = se
   if (typeof directory !== "string" || !directory) return;
   const resolved = path.resolve(directory);
   if (resolved === path.resolve(homedir()) || !resolved.includes(WORKSPACE_MARKER)) return;
-  const flags = { recursive: true, force: true, maxRetries: 5, retryDelay: 100 };
+  const flags = { recursive: true, force: true, maxRetries: 10, retryDelay: 100 };
   try {
     await rmImpl(resolved, flags);
     return true;
@@ -751,6 +754,9 @@ export function createAcpHostRuntime(options = {}) {
       throw error;
     }
   };
+  // Workspace cleanup must not replace a successful handshake or its original
+  // failure: removeAcpWorkspace reports a lock and defers a retry, never throws.
+  const cleanupWorkspace = (directory) => removeAcpWorkspace(directory, rmImpl);
   const version = options.clientVersion ?? clientVersion();
   const adapterTimeout = (id) => handshakeTimeoutFor(id, options.handshakeTimeoutMs);
   const authenticationTimeoutMs = options.authenticationTimeoutMs ?? 5 * 60_000;
@@ -895,8 +901,8 @@ export function createAcpHostRuntime(options = {}) {
       const failure = authStatusKind === "none" && !authenticationPending ? RequestError.authRequired() : error;
       if (authMethods.length && failure && typeof failure === "object") failure.authMethods = authMethods;
       if (authenticationPending && failure && typeof failure === "object") failure.authenticationPending = true;
-      abort();
-      await removeAcpWorkspace(cwd, rmImpl);
+      await abort();
+      await cleanupWorkspace(cwd);
       throw failure;
     } finally {
       signal?.removeEventListener("abort", abort);
@@ -948,8 +954,8 @@ export function createAcpHostRuntime(options = {}) {
             return { ...adapterShell(id), ...failureFields(classifyAcpFailure(error)), ...(isAuthRequiredError(error) ? { authMethods: error.authMethods ?? [] } : {}) };
           } finally {
             if (connected) {
-              connected.stop();
-              await removeAcpWorkspace(connected.cwd, rmImpl);
+              await connected.stop();
+              await cleanupWorkspace(connected.cwd);
             }
           }
         }, { updateOnly });
@@ -1022,8 +1028,8 @@ export function createAcpHostRuntime(options = {}) {
         ...(resolved.version ? { version: resolved.version, managed: true } : {}),
       };
       latestStatus.set(id, adapter);
-      connected.stop();
-      await removeAcpWorkspace(connected.cwd, rmImpl);
+      await connected.stop();
+      await cleanupWorkspace(connected.cwd);
       return adapter;
     },
 
@@ -1040,8 +1046,8 @@ export function createAcpHostRuntime(options = {}) {
           return connect(workBuddyAuth?.command ?? resolved.command, `auth-${id}`, () => {}, signal, input.methodId, [], false, workBuddyAuth);
         }, authenticationTimeoutMs);
         if (id === "workbuddyCn" || id === "workbuddyIntl") {
-          connected.stop();
-          await removeAcpWorkspace(connected.cwd, rmImpl);
+          await connected.stop();
+          await cleanupWorkspace(connected.cwd);
           connected = null;
           // Login is useful only if a fresh chat process can restore credentials.
           connected = await withHandshakeTimeout((signal) => connect(resolved.command, `auth-check-${id}`, () => {}, signal, undefined, [], false, null, true), adapterTimeout(id));
@@ -1061,8 +1067,8 @@ export function createAcpHostRuntime(options = {}) {
         return adapter;
       } finally {
         if (connected) {
-          connected.stop();
-          await removeAcpWorkspace(connected.cwd, rmImpl);
+          await connected.stop();
+          await cleanupWorkspace(connected.cwd);
         }
       }
     },
@@ -1142,8 +1148,8 @@ export function createAcpHostRuntime(options = {}) {
           });
         }
       } catch (error) {
-        connected.stop();
-        await removeAcpWorkspace(connected.cwd, rmImpl);
+        await connected.stop();
+        await cleanupWorkspace(connected.cwd);
         await mcpBridge?.close();
         return fail(promptFailureMessage(classifyAcpFailure(error)));
       }
@@ -1159,9 +1165,8 @@ export function createAcpHostRuntime(options = {}) {
         if (session.settled) return;
         session.settled = true;
         notify(event);
-        session.stop();
         active.delete(requestId);
-        void removeAcpWorkspace(session.cwd, rmImpl);
+        void session.stop().then(() => cleanupWorkspace(session.cwd));
         void session.mcpBridge?.close();
       };
       void connected.connection.prompt({ sessionId: connected.sessionId, prompt: content.blocks }).then((result) => {

@@ -92,7 +92,7 @@ test("cleanup retries and defers a busy workspace instead of rejecting the conne
   let calls = 0;
   const busy = async (actual, flags) => {
     expect(actual).toBe(directory);
-    expect(flags).toMatchObject({ recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    expect(flags).toMatchObject({ recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     if (++calls === 1) throw Object.assign(new Error("busy"), { code: "EBUSY" });
   };
   expect(await removeAcpWorkspace(directory, busy, { schedule(fn, delay) {
