@@ -216,6 +216,7 @@ const AuthenticatedWorkspace = () => {
         demoMode={session.demoMode}
         isLoggingOut={logoutMutation.isPending}
         user={session.user}
+        encryptedNotesSupported={session.features?.encryptedNotes === true}
         onLogout={() => logoutMutation.mutate()}
       />
     </Suspense>

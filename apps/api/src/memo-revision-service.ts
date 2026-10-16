@@ -11,6 +11,7 @@ import {
 import type { AuditActor } from "./api-context";
 import { AppError } from "./app-error";
 import { auditStatement } from "./audit";
+import { encryptedNoteUpdateError } from "./encrypted-note-guard";
 import { createId, isoNow, parseJsonArray } from "./entity-utils";
 import { sha256 } from "./hash-utils";
 import { upsertMemoSearchDocumentStatement } from "./memo-search-index";
@@ -198,6 +199,10 @@ export const restoreMemoRevision = async (
   const tags = parseJsonArray(revision.tags_json);
   const contentJson = parseDoc(revision.content_json);
   const contentMarkdown = revision.content_markdown || docToMarkdown(contentJson);
+  const encryptedRestoreError = encryptedNoteUpdateError(current.content_markdown, contentMarkdown, true);
+  if (encryptedRestoreError) {
+    throw new AppError(encryptedRestoreError.error, encryptedRestoreError.message, encryptedRestoreError.status);
+  }
   const contentText = revision.content_text || docToText(contentJson);
   const title = normalizeMemoTitle(revision.title);
   const contentHash = await sha256(contentMarkdown + JSON.stringify(contentJson));

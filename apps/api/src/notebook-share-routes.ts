@@ -18,6 +18,7 @@ import type { Hono } from "hono";
 import type { AppEnv } from "./api-context";
 import { hashPassword, verifyPassword, randomToken } from "./auth-crypto";
 import { audit } from "./audit";
+import { isEncryptedNoteMarkdown } from "./encrypted-note-guard";
 import { createId, isoNow, parseJsonArray } from "./entity-utils";
 import { apiError, notFound } from "./http-errors";
 import { getAuditActor, getWorkspaceId, requireUser } from "./request-auth";
@@ -277,7 +278,7 @@ export const registerPublicNotebookShareRoutes = (app: Hono<AppEnv>) => {
           note_body_font: string | null;
         }
       >();
-    if (!row) return notFound(c, "Shared note not found");
+    if (!row || isEncryptedNoteMarkdown(row.content_markdown)) return notFound(c, "Shared note not found");
     const contentJson = JSON.parse(row.content_json) as TiptapDoc;
     const memoUrls: Record<string, string> = {};
     const ids = collectMemoLinkIds(
