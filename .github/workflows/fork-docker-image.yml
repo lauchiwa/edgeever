@@ -1,0 +1,181 @@
+name: Fork server image
+
+# Builds this fork's self-hosted server image (API + bundled Web/PWA) from the
+# same vX.Y.Z-rc.N tag as the Windows release, so the server and the desktop
+# client ship the same fork code (see docs/fork-releases.md). Upstream's
+# docker-image.yml is gated to tianma-if/edgeever and never runs here.
+#
+# - test: builds a local amd64 image and checks the running container,
+#   including that it advertises the fork's encrypted-note guard.
+# - publish: pushes ghcr.io/<fork>/edgeever:<tag>, :<version> and the moving
+#   :rc tag (only when this tag is the newest fork release), then pulls the
+#   pushed tag back and checks it again. It never pushes :latest.
+on:
+  push:
+    tags:
+      - "v*-rc.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag vX.Y.Z-rc.N to rebuild the server image for
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-docker-image-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  TAG: ${{ github.event.inputs.tag || github.ref_name }}
+
+jobs:
+  test:
+    if: github.repository == 'lauchiwa/edgeever'
+    name: Build and verify container
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: Check the tag
+        run: |
+          set -euo pipefail
+          node scripts/fork-release-version.mjs check "${TAG}"
+          git fetch origin main
+          git merge-base --is-ancestor "${TAG}^{commit}" origin/main || {
+            echo "::error::${TAG} is not on main. Release only reviewed, merged commits."; exit 1; }
+
+      # main keeps the bare upstream version; the image reports the tag's version.
+      - name: Apply the release version
+        run: node scripts/fork-release-version.mjs apply "${TAG}"
+
+      - name: Build local image
+        run: docker build --build-arg EDGE_EVER_BUILD_ID="$(git rev-parse "${TAG}^{commit}")" --tag edgeever:fork-ci .
+
+      - name: Verify the container
+        run: |
+          set -euo pipefail
+          docker run --detach --name edgeever-fork-ci \
+            --env EDGE_EVER_AUTH_PASSWORD=fork-container-ci-password \
+            --publish 127.0.0.1:8787:8787 \
+            edgeever:fork-ci
+          health=""
+          for attempt in $(seq 1 60); do
+            health="$(curl --fail --silent --show-error http://127.0.0.1:8787/api/health)" && break
+            sleep 1
+          done
+          echo "${health}" | jq -e '.ok == true and .runtime == "self-hosted-bun" and .authMode == "required"'
+          curl --fail --silent --show-error http://127.0.0.1:8787/ | grep -F '<!doctype html>'
+          curl --fail --silent --show-error http://127.0.0.1:8787/api/v1/auth/session | jq -e '.features.encryptedNotes == true'
+          docker exec edgeever-fork-ci test -f /data/edgeever.sqlite
+          docker exec edgeever-fork-ci test ! -e /app/node_modules
+          docker stop --timeout 30 edgeever-fork-ci
+          docker logs edgeever-fork-ci | grep -F '[self-hosted] shutdown complete'
+
+      - name: Show container logs on failure
+        if: failure()
+        run: docker logs edgeever-fork-ci || true
+
+  publish:
+    if: github.repository == 'lauchiwa/edgeever'
+    name: Publish multi-platform image
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: Resolve image tags
+        id: image
+        run: |
+          set -euo pipefail
+          node scripts/fork-release-version.mjs check "${TAG}"
+          node scripts/fork-release-version.mjs apply "${TAG}"
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          version="${TAG#v}"
+          newest="$(git tag --list 'v*-rc.*' --sort=-v:refname | head -n 1)"
+          {
+            echo "name=${image}"
+            echo "version=${version}"
+            echo "revision=$(git rev-parse "${TAG}^{commit}")"
+            echo "tags<<EOF"
+            echo "${image}:${TAG}"
+            echo "${image}:${version}"
+            # A rebuild of an older tag must never move the rc channel backwards.
+            if [[ "${newest}" == "${TAG}" ]]; then echo "${image}:rc"; fi
+            echo "EOF"
+          } >> "${GITHUB_OUTPUT}"
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Sign in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          build-args: |
+            EDGE_EVER_BUILD_ID=${{ steps.image.outputs.revision }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.image.outputs.tags }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ steps.image.outputs.revision }}
+            org.opencontainers.image.version=${{ steps.image.outputs.version }}
+          cache-from: type=gha,scope=fork-server
+          cache-to: type=gha,scope=fork-server,mode=max
+
+      - name: Verify the published image
+        env:
+          IMAGE: ${{ steps.image.outputs.name }}:${{ env.TAG }}
+          TAGS: ${{ steps.image.outputs.tags }}
+        run: |
+          set -euo pipefail
+          docker buildx imagetools inspect --raw "${IMAGE}" |
+            jq -e '([.manifests[].platform.architecture] | index("amd64") != null) and ([.manifests[].platform.architecture] | index("arm64") != null)'
+          docker pull "${IMAGE}"
+          trap 'docker rm --force edgeever-fork-audit >/dev/null 2>&1 || true' EXIT
+          docker run --detach --name edgeever-fork-audit \
+            --env EDGE_EVER_AUTH_PASSWORD=fork-published-audit-password \
+            --publish 127.0.0.1:8787:8787 \
+            "${IMAGE}"
+          health=""
+          for attempt in $(seq 1 60); do
+            health="$(curl --fail --silent --show-error http://127.0.0.1:8787/api/health)" && break
+            sleep 1
+          done
+          echo "${health}" | jq -e '.ok == true and .runtime == "self-hosted-bun"'
+          curl --fail --silent --show-error http://127.0.0.1:8787/api/v1/auth/session | jq -e '.features.encryptedNotes == true'
+          docker stop --timeout 30 edgeever-fork-audit
+          # GHCR creates new packages as private; servers then need docker login to pull.
+          docker logout ghcr.io
+          if docker buildx imagetools inspect "${IMAGE}" >/dev/null 2>&1; then
+            visibility="public (anonymous pull works)"
+          else
+            visibility="private: make the package public or run docker login ghcr.io on the server"
+            echo "::warning::${IMAGE} is not anonymously pullable (${visibility})."
+          fi
+          {
+            echo "### Published ${IMAGE}"
+            echo
+            echo "- Tags: $(tr '\n' ' ' <<<"${TAGS}")"
+            echo "- Visibility: ${visibility}"
+          } >> "${GITHUB_STEP_SUMMARY}"

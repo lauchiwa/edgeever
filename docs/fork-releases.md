@@ -5,8 +5,11 @@ It builds and publishes its own Windows desktop releases on its own Releases
 page, and installed fork clients update only from there. Upstream is never
 written to. 中文：[fork-releases.zh-CN.md](fork-releases.zh-CN.md).
 
-Scope today: **Windows x64 desktop only.** macOS, Linux, Android and iOS fork
-builds are not published (Linux follows once Windows is proven).
+Scope today: **Windows x64 desktop, plus the server image**
+`ghcr.io/lauchiwa/edgeever` (API and the browser Web app). macOS, Linux,
+Android and iOS fork builds are not published (Linux follows once Windows is
+proven). Fork-only features such as [encrypted notes](encrypted-notes.md) need
+both a fork client and a server running the fork image.
 
 ## The version
 
@@ -41,6 +44,8 @@ refuses a base below one already released.
 | Windows update trust | only this fork's Ed25519 keys, only `X.Y.Z-rc.N` | `windows-update-trust.test.mjs`, pinned fingerprints |
 | Links | diagnostics, feedback, desktop downloads point at the fork; 5 deliberate upstream links remain (Android APK, server release notes, plugin docs) | upstream-literal scan with an allowlist |
 | ACP | Windows ACP fixes | ACP tests, invariants |
+| Encrypted notes | client-side encryption; the server refuses plaintext overwrites and advertises `features.encryptedNotes` | `encrypted-note*.test.mjs`, `tests/e2e/encrypted-note.spec.ts` |
+| Server image | `fork-docker-image.yml` publishes rc tags only, never `latest` | `fork-workflows.test.mjs` |
 
 The invariants test exists because an upstream merge can apply cleanly and
 still undo the fork, for example by adding a new `tianma-if/edgeever` literal.
@@ -133,8 +138,59 @@ collide with upstream's next ones.
    node scripts/fork-sign-release.mjs v1.119.0-rc.0 --publish
    ```
 
+The same tag also triggers `fork-docker-image.yml`, which builds the server
+image (see below). The two workflows are independent: a failed image does not
+hold back the Windows release, and can be rebuilt by running the workflow
+manually with the same tag.
+
 A tag with a wrong base does not need deleting; publish a correct, higher tag.
 Never delete or re-sign a published release.
+
+## Server image
+
+`fork-docker-image.yml` runs on every `vX.Y.Z-rc.N` tag on `main`:
+
+- `test` builds the image and runs it: health, the Web app, SQLite under
+  `/data`, `features.encryptedNotes`, and a graceful shutdown.
+- `publish` pushes `linux/amd64` and `linux/arm64` to
+  `ghcr.io/lauchiwa/edgeever`, then pulls and runs the pushed image again.
+
+Tags: `:vX.Y.Z-rc.N`, `:X.Y.Z-rc.N`, and a moving `:rc` that follows the
+highest rc tag. `:latest` is never published, so a server still on upstream
+defaults cannot pick up a fork image by accident, and vice versa.
+
+A new GHCR package usually starts private; the `publish` summary warns when
+anonymous pulls fail. Either make it public
+(GitHub → Packages → edgeever → Package settings → Change visibility), or run
+`docker login ghcr.io` on the server with a token that has `read:packages`.
+
+### Switching a server to the fork image
+
+The installer's daily `update.sh` keeps whatever image `~/edgeever/.env` names,
+so the switch is two lines in that file. Take a cold backup first: a fork
+image on an older upstream base would run against a database migrated by a
+newer upstream image.
+
+```sh
+cd ~/edgeever
+docker compose --env-file .env stop edgeever
+docker run --rm -v edgeever_edgeever-data:/data -v "$PWD":/backup alpine \
+  tar czf /backup/edgeever-data-$(date +%Y%m%d%H%M).tgz -C /data .
+# in .env:
+#   EDGE_EVER_IMAGE='ghcr.io/lauchiwa/edgeever'
+#   EDGE_EVER_VERSION='v1.119.0-rc.4'   # pin; or 'rc' to follow fork releases
+docker compose --env-file .env pull && docker compose --env-file .env up -d
+curl -fsS http://127.0.0.1:8787/api/v1/auth/session   # features.encryptedNotes: true
+```
+
+Check the volume name with `docker volume ls` first. Do not move to a fork
+image whose `X.Y.Z` is below the upstream version the server runs now; sync
+upstream first.
+
+Rollback: stop the service, restore the old values of `EDGE_EVER_IMAGE` and
+`EDGE_EVER_VERSION`, restore the `/data` backup into an empty volume, and
+start again. Encrypted notes stay ciphertext under an upstream image: readable
+only after switching back, and editing them there would overwrite them.
 
 ## Installed clients
 
