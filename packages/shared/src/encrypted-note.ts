@@ -19,6 +19,8 @@ const AAD = new TextEncoder().encode(MARKER);
 export const ENCRYPTED_NOTE_PLACEHOLDER_TEXT = "🔒 Encrypted note";
 export const ENCRYPTED_NOTE_PBKDF2_ITERATIONS = 600_000;
 export const ENCRYPTED_NOTE_MIN_PASSPHRASE_LENGTH = 8;
+/** AES-GCM additional data; native crypto (Android) must authenticate the same bytes. */
+export const ENCRYPTED_NOTE_AAD = MARKER;
 
 const B64URL = z.string().min(1).max(MAX_ENVELOPE_LENGTH).regex(/^[A-Za-z0-9_-]+$/);
 
@@ -44,6 +46,12 @@ const EncryptedNotePayloadSchema = z.object({
   doc: z.object({ type: z.literal("doc") }).passthrough(),
 });
 export type EncryptedNotePayload = { v: 1; doc: TiptapDoc };
+
+/** Plaintext that AES-GCM seals (as UTF-8): the note document wrapped in a versioned payload. */
+export const encryptedNotePayloadJson = (doc: TiptapDoc) => JSON.stringify({ v: 1, doc } satisfies EncryptedNotePayload);
+
+export const parseEncryptedNotePayloadJson = (json: string): TiptapDoc =>
+  EncryptedNotePayloadSchema.parse(JSON.parse(json)).doc as TiptapDoc;
 
 export const encryptedNotePlaceholderDoc = (): TiptapDoc => ({
   type: "doc",
@@ -108,11 +116,10 @@ export const encryptNoteDoc = async (
   kdf: { salt: string; iterations: number },
 ): Promise<EncryptedNoteEnvelope> => {
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const payload: EncryptedNotePayload = { v: 1, doc };
   const ciphertext = await subtle().encrypt(
     { name: "AES-GCM", iv, additionalData: AAD },
     key,
-    new TextEncoder().encode(JSON.stringify(payload)),
+    new TextEncoder().encode(encryptedNotePayloadJson(doc)),
   );
   return {
     v: 1,
@@ -129,6 +136,5 @@ export const decryptNoteDoc = async (envelope: EncryptedNoteEnvelope, key: Crypt
     key,
     toBytes(envelope.ct),
   );
-  const payload = EncryptedNotePayloadSchema.parse(JSON.parse(new TextDecoder().decode(plaintext)));
-  return payload.doc as TiptapDoc;
+  return parseEncryptedNotePayloadJson(new TextDecoder().decode(plaintext));
 };

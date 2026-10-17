@@ -28,11 +28,14 @@ const read = (file) => readFileSync(join(root, file), "utf8");
 // The only upstream references allowed in shipped desktop/renderer code, each
 // pointing at something this fork deliberately does not publish itself.
 const ALLOWED_UPSTREAM = {
-  "apps/web/src/components/NotebookPane.tsx": { count: 1, why: "Android APK: the fork does not build mobile" },
+  "apps/web/src/components/NotebookPane.tsx": { count: 1, why: "Android APK: the fork publishes no mobile release" },
   "apps/web/src/components/settings/SystemInfoPanel.tsx": { count: 2, why: "release notes of the upstream server instance" },
   "apps/web/src/components/settings/PluginManagerCard.tsx": { count: 2, why: "upstream plugin development docs" },
+  // Unreachable in the fork APK: app.config.ts disables expo-updates, which hides the update card.
+  "apps/mobile/src/lib/mobile-release.ts": { count: 3, why: "upstream APK update check, disabled in fork builds" },
+  "apps/mobile/src/screens/LoginScreen.tsx": { count: 1, why: "project homepage link on the login screen" },
 };
-const SCANNED = ["apps/desktop/src", "apps/web/src", "packages/shared/src"];
+const SCANNED = ["apps/desktop/src", "apps/web/src", "apps/mobile/src", "apps/mobile/modules", "packages/shared/src"];
 // Also catches regex-escaped forms such as tianma-if\/edgeever, which hard-code
 // the repository just as surely as a URL does. Matching runs in JavaScript:
 // git grep -E does not match the escaped form consistently across platforms.
@@ -119,6 +122,22 @@ describe("fork Windows update trust", () => {
       return key.export({ type: "spki", format: "der" }).toString("base64");
     });
     expect(new Set(exported).size).toBe(2);
+  });
+});
+
+describe("fork Android app", () => {
+  // Upstream OTA JavaScript (same runtimeVersion) would replace the fork's
+  // encrypted-note client, and upstream APKs are signed with another key.
+  test("never takes upstream OTA or APK updates", () => {
+    const config = read("apps/mobile/app.config.ts");
+    expect(config).toMatch(/updates:\s*\{[^}]*enabled:\s*false/);
+    expect(read("apps/mobile/src/lib/mobile-update.tsx")).toMatch(/isSupported = !__DEV__ && Updates\.isEnabled/);
+  });
+
+  test("encrypted notes stay wired in", () => {
+    expect(read("apps/mobile/src/screens/WorkspaceMemoDetail.tsx")).toContain("<MobileEncryptedNotePane");
+    expect(read("apps/mobile/src/screens/WorkspaceScreen.tsx")).toMatch(/if \(isMobileEncryptedNote\(memo\.contentMarkdown\)\) return;/);
+    expect(existsSync(join(root, "apps/mobile/modules/edgeever-crypto/android/src/main/java/org/edgeever/crypto/EncryptedNoteCrypto.java"))).toBe(true);
   });
 });
 

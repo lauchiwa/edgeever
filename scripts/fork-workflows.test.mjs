@@ -1,6 +1,6 @@
 // Guards the fork's workflows: they run only in the fork, only the release's
-// publish job can reach the signing key, and upstream's snapshot sync stays
-// out of the fork's own files.
+// publish job can reach the signing key (and only the Android sign job the
+// keystore), and upstream's snapshot sync stays out of the fork's own files.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
@@ -8,7 +8,13 @@ import { FORK_REPOSITORY } from "../apps/desktop/src/main/fork-config.mjs";
 
 const root = join(import.meta.dir, "..");
 const workflow = (name) => readFileSync(join(root, ".github/workflows", name), "utf8");
-const FORK_WORKFLOWS = ["fork-ci.yml", "fork-docker-image.yml", "fork-release.yml", "fork-upstream-watch.yml"];
+const FORK_WORKFLOWS = [
+  "fork-android.yml",
+  "fork-ci.yml",
+  "fork-docker-image.yml",
+  "fork-release.yml",
+  "fork-upstream-watch.yml",
+];
 
 describe("fork workflows", () => {
   test("every job runs only in this fork", () => {
@@ -16,7 +22,10 @@ describe("fork workflows", () => {
       const text = workflow(name);
       const jobsBlock = text.slice(text.search(/^jobs:\s*$/m));
       const jobs = [...jobsBlock.matchAll(/^  ([\w-]+):\s*$/gm)].map((match) => match[1]);
-      const gates = [...jobsBlock.matchAll(/^    if: github\.repository == '([^']+)'\s*$/gm)].map((match) => match[1]);
+      // The repository gate comes first; it may only be narrowed further by event.
+      const gates = [
+        ...jobsBlock.matchAll(/^    if: github\.repository == '([^']+)'(?: && github\.event_name == '[\w-]+')?\s*$/gm),
+      ].map((match) => match[1]);
       expect(jobs.length).toBeGreaterThan(0);
       expect(gates).toEqual(jobs.map(() => FORK_REPOSITORY));
     }
@@ -107,6 +116,40 @@ describe("fork workflows", () => {
     expect(publish).toContain('image="ghcr.io/${GITHUB_REPOSITORY,,}"');
     const code = text.split("\n").filter((line) => !/^\s*#/.test(line)).join("\n");
     expect(code).not.toMatch(/:latest\b|tianma-if/);
+  });
+
+  // The Android test APK is a workflow artifact, never a release asset. Only
+  // the sign job, on manual dispatch, can reach the fork keystore.
+  test("only the Android sign job reaches the keystore, on dispatch, and it runs nothing it installs", () => {
+    const text = workflow("fork-android.yml");
+    const { build, sign, ...others } = jobsOf(text);
+    expect(Object.keys(others)).toEqual([]);
+    expect(text).toMatch(/^permissions:\s*\n\s*contents: read\s*\n/m);
+    expect(text).not.toMatch(/contents: write|git push|gh release|--publish|tianma-if/);
+    expect(text.slice(0, text.search(/^jobs:\s*$/m))).not.toMatch(/secrets\./);
+
+    expect(build).not.toMatch(/secrets\.|environment:|KEYSTORE/);
+    expect(build).toContain('expo.modules.updates.ENABLED" android:value="false"');
+
+    expect(sign).toMatch(/^    if: github\.repository == '[^']+' && github\.event_name == 'workflow_dispatch'\s*$/m);
+    expect(sign).toMatch(/^    environment: fork-android\s*$/m);
+    expect(sign).toMatch(/^    needs: build\s*$/m);
+    expect([...sign.matchAll(/secrets\.(\w+)/g)].map((match) => match[1]).sort())
+      .toEqual(["FORK_ANDROID_KEYSTORE_BASE64", "FORK_ANDROID_KEYSTORE_PASSWORD"]);
+    expect(sign).not.toMatch(/bun |npm |npx |pnpm |yarn |setup-bun|setup-node|setup-java|cache:/);
+    expect(sign).toContain("ref: ${{ github.sha }}");
+    expect(sign).toContain("persist-credentials: false");
+    expect(sign).toContain("umask 077");
+    expect(sign).toMatch(/trap 'rm -f "\$\{keystore\}"' EXIT/);
+    expect(sign).toContain("vars.FORK_ANDROID_SIGNER_SHA256");
+    expect(sign).toContain("node scripts/verify-android-apk-signature.mjs");
+  });
+
+  test("the Android signer check only imports Node built-ins", () => {
+    const source = readFileSync(join(root, "scripts", "verify-android-apk-signature.mjs"), "utf8");
+    const specifiers = [...source.matchAll(/^\s*(?:import|export)\s[^;]*?from\s+"([^"]+)"/gm)].map((match) => match[1]);
+    expect(specifiers.length).toBeGreaterThan(0);
+    for (const specifier of specifiers) expect(specifier).toMatch(/^node:/);
   });
 
   test("CI and the watcher are read-only", () => {

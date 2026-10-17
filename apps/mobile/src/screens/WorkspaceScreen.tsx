@@ -64,6 +64,8 @@ import {
 } from "../lib/local-mirror";
 import { AccountSecurityPanel } from "./AccountSecurityModal";
 import { beginEditorStartup, markStartup } from "../lib/startup-performance";
+import { assertNotEncryptedNote, isMobileEncryptedNote } from "../lib/mobile-encrypted-note";
+import { mobileEncryptedNoteVault } from "../lib/mobile-encrypted-note-vault";
 import MobileWebClipCapture from "../components/MobileWebClipCapture";
 import { MobileCreateChoiceModal, MobileTemplatePickerModal } from "../components/MobileTemplatePicker";
 import { useMobileTheme } from "../lib/mobile-theme";
@@ -152,6 +154,8 @@ export const WorkspaceScreen = ({
   const safeAreaInsets = useSafeAreaInsets();
   const syncQueueScope = session?.baseUrl ?? "";
   const dataScope = createMobileDataScope(session?.baseUrl ?? "", session?.user?.id);
+  // The vault passphrase belongs to one account; drop it on sign-out or account switch.
+  useEffect(() => () => mobileEncryptedNoteVault.lock(), [dataScope]);
   const [activeView, setActiveView] = useState<MobileView>("notes");
   const [activeNotebookId, setActiveNotebookId] = useState<string>(ALL_NOTES_ID);
   const autoSelectedDemoNotebookRef = useRef(false);
@@ -478,6 +482,8 @@ export const WorkspaceScreen = ({
   }, []);
 
   const openRichEditor = useCallback((memo: MemoDetail, initialFocus: "body" | "title" = "body") => {
+    // The plaintext editor would save over the ciphertext; the note detail edits it after unlock.
+    if (isMobileEncryptedNote(memo.contentMarkdown)) return;
     if (hasDiagramDocumentMarker(memo.contentMarkdown)) {
       Alert.alert(
         resolvedLocale !== "zh-CN" ? "View-only diagram" : "图表暂为只读",
@@ -936,6 +942,7 @@ export const WorkspaceScreen = ({
   });
 
   const applyAiDraftToMemo = async (memo: MemoDetail, draft: string, mode: "append" | "replace") => {
+    assertNotEncryptedNote(memo.contentMarkdown);
     const normalizedDraft = draft.trim();
     const contentMarkdown = mode === "append"
       ? [memo.contentMarkdown.trimEnd(), normalizedDraft].filter(Boolean).join("\n\n")

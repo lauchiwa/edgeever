@@ -25,6 +25,8 @@ import type { ImageSize } from "../lib/mobile-image-zoom";
 import { SAFE_DOM_WEBVIEW_PROPS } from "../lib/mobile-dom";
 import { getNextMobileNoteSearchIndex } from "../lib/mobile-note-search";
 import { hasMobilePoster, hasMobileInfographic, hasMobileStructuredTable, hasMobileVisualDiagram, resolveMobileMemoViewerContent } from "../lib/mobile-diagram";
+import { isMobileEncryptedNote } from "../lib/mobile-encrypted-note";
+import { MobileEncryptedNotePane } from "./MobileEncryptedNotePane";
 import { safeDomCall } from "../lib/safe-dom-call";
 import {
   getMobileImageTarget,
@@ -569,7 +571,9 @@ export const MemoDetailModal = ({
     () => (memo ? hasMobileStructuredTable(memo.contentMarkdown) : false),
     [memo]
   );
-  const locksRichTextEdit = isVisualDiagram || isStructuredTable || Boolean(memo && (hasMobileInfographic(memo.contentMarkdown) || hasMobilePoster(memo.contentMarkdown)));
+  // Encrypted notes are edited inside MobileEncryptedNotePane, never by the plaintext rich editor.
+  const isEncryptedNote = Boolean(memo && isMobileEncryptedNote(memo.contentMarkdown));
+  const locksRichTextEdit = isEncryptedNote || isVisualDiagram || isStructuredTable || Boolean(memo && (hasMobileInfographic(memo.contentMarkdown) || hasMobilePoster(memo.contentMarkdown)));
   const visualDiagramJson = useMemo(() => {
     const diagram = memo ? parseDiagramDocument(memo.contentMarkdown) : null;
     return diagram ? JSON.stringify(diagram) : undefined;
@@ -1425,7 +1429,16 @@ export const MemoDetailModal = ({
               <View style={styles.detailDivider} />
             </View>
             )}
-            {baseUrl ? (
+            {isEncryptedNote ? (
+              <MobileEncryptedNotePane
+                key={`${memo.id}:${syncStatus === "conflict" ? "conflict" : "synced"}`}
+                locale={resolvedLocale}
+                memo={memo}
+                readOnly={memo.isDeleted}
+                theme={resolvedTheme}
+                updateMutation={updateMutation}
+              />
+            ) : baseUrl ? (
               <LocalTiptapEditor
                 key={`${memo.id}:${viewerGeneration}`}
                 aiPromptsJson={isEditing ? editor.aiPromptsJson : undefined}
@@ -1466,7 +1479,7 @@ export const MemoDetailModal = ({
                 <Text style={styles.errorText}>{resolvedLocale !== "zh-CN" ? "Not signed in." : "未登录。"}</Text>
               </View>
             )}
-            {!viewerReady ? (
+            {!viewerReady && !isEncryptedNote ? (
               <View pointerEvents="none" style={detailLayoutStyles.viewerLoading}>
                 <ActivityIndicator color="#0f172a" />
               </View>
