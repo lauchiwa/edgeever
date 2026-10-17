@@ -4,16 +4,16 @@ import { spawn } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { stopAcpChild, stopAcpChildSync } from "./acp-process-lifecycle.mjs";
+import { stopAcpChild, stopAcpChildSync, trackAcpChildClosure } from "./acp-process-lifecycle.mjs";
 
 const fakeChild = () => Object.assign(new EventEmitter(), {
   pid: 12345, exitCode: null, signalCode: null,
   stdin: { destroy() {} },
-  kill(signal) { this.signalCode = signal; this.emit("exit", null, signal); },
+  kill(signal) { this.signalCode = signal; this.emit("exit", null, signal); this.emit("close", null, signal); },
 });
 
 describe("ACP process lifecycle", () => {
-  test("waits for both Windows tree termination and child exit, before stdin EOF", async () => {
+  test("waits for both Windows tree termination and child close, before stdin EOF", async () => {
     const child = fakeChild();
     const order = [];
     child.stdin.destroy = () => order.push("stdin");
@@ -33,11 +33,14 @@ describe("ACP process lifecycle", () => {
     void stopped.then(() => { finished = true; });
     child.signalCode = "SIGTERM";
     child.emit("exit");
-    await Promise.resolve();
-    expect(finished).toBe(false);
     complete();
+    await Promise.resolve();
+    // A descendant can still hold the inherited pipes (and the cwd) after exit.
+    expect(finished).toBe(false);
+    child.emit("close");
     await stopped;
     expect(order).toEqual(["taskkill", "stdin"]);
+    expect(child.listenerCount("close")).toBe(0);
   });
 
   test("never uses a stale PID after exit, including synchronous application shutdown", async () => {
@@ -45,8 +48,29 @@ describe("ACP process lifecycle", () => {
     child.exitCode = 0;
     child.kill = () => { throw new Error("must not kill"); };
     const unexpected = () => { throw new Error("must not spawn taskkill"); };
-    await stopAcpChild(child, { platform: "win32", execFileImpl: unexpected });
+    const stopped = stopAcpChild(child, { platform: "win32", execFileImpl: unexpected });
+    child.emit("close");
+    await stopped;
     stopAcpChildSync(child, { platform: "win32", execFileSyncImpl: unexpected });
+  });
+
+  test("returns at once for a child that closed before the first stop request", async () => {
+    const child = fakeChild();
+    trackAcpChildClosure(child);
+    child.exitCode = 0;
+    child.emit("exit");
+    child.emit("close");
+    child.kill = () => { throw new Error("must not kill"); };
+    await stopAcpChild(child, { platform: "win32", execFileImpl() { throw new Error("must not spawn"); }, timeoutMs: 60_000 });
+  });
+
+  test("bounds the wait when pipes never close", async () => {
+    const child = fakeChild();
+    child.kill = (signal) => { child.signalCode = signal; child.emit("exit"); };
+    const started = Date.now();
+    await stopAcpChild(child, { platform: "linux", graceMs: 10, timeoutMs: 50 });
+    expect(Date.now() - started).toBeLessThan(1_000);
+    expect(child.listenerCount("close")).toBe(0);
   });
 
   test("falls back to the owned process handle when taskkill cannot start", async () => {
@@ -67,7 +91,7 @@ describe("ACP process lifecycle", () => {
     const signals = [];
     child.kill = (signal) => {
       signals.push(signal);
-      if (signal === "SIGKILL") { child.signalCode = signal; child.emit("exit"); }
+      if (signal === "SIGKILL") { child.signalCode = signal; child.emit("exit"); child.emit("close"); }
     };
     await stopAcpChild(child, { platform: "linux", graceMs: 10, timeoutMs: 100 });
     expect(signals).toEqual(["SIGTERM", "SIGKILL"]);

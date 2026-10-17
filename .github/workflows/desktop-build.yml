@@ -457,6 +457,9 @@ jobs:
             Start-Sleep -Seconds (15 * $attempt)
           }
 
+      - name: Test ACP process and workspace cleanup
+        run: bun test --cwd apps/desktop src/main/acp-cleanup.test.mjs
+
       - name: Build Web renderer
         env:
           EDGE_EVER_DESKTOP_BUILD: "1"
