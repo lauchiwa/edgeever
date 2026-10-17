@@ -56,7 +56,7 @@ Related Issue: #<issue-number>
 
 - **发布与更新**：本仓库是上游二开 fork，只发布 Windows x64 桌面版，版本号 `vX.Y.Z-rc.N`，禁止发布不带后缀的 `vX.Y.Z`。改动发布、更新或同步流程前必须阅读 [二开版发布](docs/fork-releases.zh-CN.md)（English: [Fork releases](docs/fork-releases.md)）。上文“GitHub Actions 与 Release 约束”描述的是上游官方仓库流程，不适用于本 fork 的发布。
 - **二开逻辑不得被上游覆盖**：仓库身份只改 `apps/desktop/src/main/fork-config.mjs` 及其镜像 `packages/shared/src/fork-config.ts`；同步上游只通过 `node scripts/fork-sync-upstream.mjs start vX.Y.Z` 的 `sync/*` 分支与 PR，禁止直接推送 `main`；`scripts/fork-invariants.test.mjs` 失败时修复二开逻辑，不得放宽该测试。
-- **签名私钥**：Windows 更新主密钥及口令只存放在维护者本机和 GitHub Environment `fork-release` 的 Secret 中，只允许 `fork-release.yml` 的 `publish` 任务（不安装依赖）读取；备用密钥只在本机冷存储，禁止进入 GitHub。禁止把私钥或口令写入仓库、日志或其他 Secret；代理不得读取私钥或口令，Secret 由维护者本人设置。
+- **签名私钥**：Windows 更新主密钥及口令只存放在维护者本机和 GitHub Environment `fork-release` 的 Secret 中，只允许 `fork-release.yml` 的 `publish` 任务（不安装依赖）读取；备用密钥只在本机冷存储，禁止进入 GitHub。禁止把私钥或口令写入仓库、日志或其他 Secret；代理不得读取私钥或口令，Secret 由维护者本人设置。Android 测试版的二开 keystore 及口令同理，只存放在维护者本机和 Environment `fork-android`，只允许 `fork-android.yml` 的 `sign` 任务（不安装依赖、仅手动触发）读取；Android 测试版只作为工作流产物，不进入 Release。
 - **Migration**：二开不新增数据库 Migration，以免与上游编号冲突。
 
 ## 环境、部署与组件约束

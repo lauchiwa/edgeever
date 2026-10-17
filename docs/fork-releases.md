@@ -8,8 +8,10 @@ written to. 中文：[fork-releases.zh-CN.md](fork-releases.zh-CN.md).
 Scope today: **Windows x64 desktop, plus the server image**
 `ghcr.io/lauchiwa/edgeever` (API and the browser Web app). macOS, Linux,
 Android and iOS fork builds are not published (Linux follows once Windows is
-proven). Fork-only features such as [encrypted notes](encrypted-notes.md) need
-both a fork client and a server running the fork image.
+proven). An Android **test build** exists only as a workflow artifact, see
+[Android test build](#android-test-build). Fork-only features such as
+[encrypted notes](encrypted-notes.md) need both a fork client and a server
+running the fork image.
 
 ## The version
 
@@ -42,7 +44,8 @@ refuses a base below one already released.
 | Identity | `apps/desktop/src/main/fork-config.mjs` (+ renderer mirror `packages/shared/src/fork-config.ts`) | `scripts/fork-invariants.test.mjs` |
 | Updates | electron-builder publishes to and updates from this fork; channel file `rc.yml` | invariants, `windows-update-metadata.test.mjs` |
 | Windows update trust | only this fork's Ed25519 keys, only `X.Y.Z-rc.N` | `windows-update-trust.test.mjs`, pinned fingerprints |
-| Links | diagnostics, feedback, desktop downloads point at the fork; server release notes point at the fork for a fork image (`vX.Y.Z-rc.N`) and upstream otherwise; 5 deliberate upstream links remain (Android APK, upstream server release notes, plugin docs) | upstream-literal scan with an allowlist |
+| Links | diagnostics, feedback, desktop downloads point at the fork; server release notes point at the fork for a fork image (`vX.Y.Z-rc.N`) and upstream otherwise; deliberate upstream links remain (Android APK download, upstream server release notes, plugin docs, the mobile app's upstream update check and homepage link) | upstream-literal scan with an allowlist |
+| Android test build | same package `org.edgeever.mobile`, fork keystore; expo-updates and the in-app APK update are off, so upstream OTA updates never replace fork code; unlocks encrypted notes natively | invariants, `fork-workflows.test.mjs`, manifest check in `fork-android.yml` |
 | ACP | Windows ACP fixes | ACP tests, invariants |
 | Encrypted notes | client-side encryption; the server refuses plaintext overwrites and advertises `features.encryptedNotes` | `encrypted-note*.test.mjs`, `tests/e2e/encrypted-note.spec.ts` |
 | Server image | `fork-docker-image.yml` publishes rc tags only, never `latest` | `fork-workflows.test.mjs` |
@@ -191,6 +194,51 @@ Rollback: stop the service, restore the old values of `EDGE_EVER_IMAGE` and
 `EDGE_EVER_VERSION`, restore the `/data` backup into an empty volume, and
 start again. Encrypted notes stay ciphertext under an upstream image: readable
 only after switching back, and editing them there would overwrite them.
+
+## Android test build
+
+`fork-android.yml` builds an arm64-v8a APK for testing by hand. It is not a
+release asset and never updates itself.
+
+- Pull requests that touch the app run `build` only: type check, encrypted
+  note tests, prebuild, a check that expo-updates is off, and the Gradle
+  release build. No secret is available there.
+- Actions → Fork Android test build → Run workflow (on `main`) also runs
+  `sign`. It runs in the `fork-android` Environment, installs nothing, signs
+  the APK with the fork keystore, and fails unless the only signer is the one
+  in `FORK_ANDROID_SIGNER_SHA256`. Download `edgeever-fork-android-apk` from
+  the run (kept 30 days); the summary shows its SHA-256.
+
+One-time keystore setup, by the maintainer (PowerShell; the agent never reads
+the keystore or its password):
+
+1. Create the Environment: Settings → Environments → New environment
+   `fork-android`, deployment branches limited to `main`.
+2. Create the key (`keytool` prompts for the password; PKCS12 uses it for the
+   key too):
+
+   ```powershell
+   keytool -genkeypair -v -storetype PKCS12 -keystore "$HOME\.config\edgeever-fork\android-fork.p12" -alias edgeever-fork -keyalg RSA -keysize 4096 -validity 10000 -dname "CN=EdgeEver fork"
+   keytool -list -v -keystore "$HOME\.config\edgeever-fork\android-fork.p12" -alias edgeever-fork
+   ```
+
+3. Store it (stdin keeps the keystore out of the command line; the password
+   is typed hidden). The variable is the `SHA256:` line printed above:
+
+   ```powershell
+   [Convert]::ToBase64String([IO.File]::ReadAllBytes("$HOME\.config\edgeever-fork\android-fork.p12")) | gh secret set FORK_ANDROID_KEYSTORE_BASE64 --env fork-android -R lauchiwa/edgeever
+   gh secret set FORK_ANDROID_KEYSTORE_PASSWORD --env fork-android -R lauchiwa/edgeever
+   gh variable set FORK_ANDROID_SIGNER_SHA256 -R lauchiwa/edgeever --body "<SHA256 fingerprint>"
+   ```
+
+4. Back up the `.p12` file and its password offline. Without them, a later
+   build cannot install over the current one; the app then has to be
+   uninstalled, which drops its local cache (data on the server is kept).
+
+Installing: the package name matches upstream's but the signer differs, so
+Android refuses to install over the upstream app. Uninstall it first (its
+local cache and unsent offline edits are lost), install the fork APK, and log
+in again. Later fork builds install over each other.
 
 ## Installed clients
 

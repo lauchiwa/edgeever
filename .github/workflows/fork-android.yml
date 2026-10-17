@@ -1,0 +1,166 @@
+name: Fork Android test build
+
+# Android test APK for this fork (lauchiwa/edgeever). It is not part of the
+# Windows rc release: the signed APK is only a workflow artifact the maintainer
+# downloads and installs by hand. Pull requests that touch the app only compile
+# it; signing runs on manual dispatch, in the fork-android environment, without
+# installing anything. See docs/fork-releases.md.
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - "apps/mobile/**"
+      - "packages/client/**"
+      - "packages/shared/**"
+      - "bun.lock"
+      - "package.json"
+      - ".github/workflows/fork-android.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-android-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    if: github.repository == 'lauchiwa/edgeever'
+    name: Build Android APK (unsigned for the fork)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    outputs:
+      version: ${{ steps.apk.outputs.version }}
+      version_code: ${{ steps.apk.outputs.version_code }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Free disk space for the Android build
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/node_modules/@angular /opt/ghc /usr/local/.ghcup /usr/share/swift
+      - name: Install dependencies
+        run: |
+          for attempt in 1 2 3; do
+            bun install --frozen-lockfile && exit 0
+            [ "$attempt" = "3" ] && exit 1
+            sleep "$((15 * attempt))"
+          done
+      - run: bun run typecheck:mobile
+      # The Java crypto core is checked against WebCrypto here (the runner has a JDK).
+      - name: Encrypted note tests
+        run: >-
+          bun test packages/shared/src/encrypted-note.test.mjs
+          apps/mobile/modules/edgeever-crypto/test/encrypted-note-crypto.interop.test.ts
+          apps/mobile/src/lib/encrypted-note-vault.test.ts apps/mobile/src/lib/mobile-encrypted-note.test.ts
+          apps/mobile/src/screens/workspace-memo-cache.test.ts
+          scripts/fork-invariants.test.mjs scripts/fork-workflows.test.mjs
+      - name: Generate the Android project
+        working-directory: apps/mobile
+        env:
+          CI: "1"
+        run: bunx expo prebuild --platform android --no-install
+      # The fork APK must never take upstream's OTA updates (see app.config.ts).
+      - name: Check that upstream OTA updates are off
+        run: grep -F '<meta-data android:name="expo.modules.updates.ENABLED" android:value="false"/>' apps/mobile/android/app/src/main/AndroidManifest.xml
+      - name: Gradle release build
+        working-directory: apps/mobile/android
+        env:
+          NODE_ENV: production
+        run: >-
+          ./gradlew assembleRelease --no-daemon
+          -PreactNativeArchitectures=arm64-v8a
+          "-Dorg.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8"
+      - name: Read the APK version
+        id: apk
+        run: |
+          apk=apps/mobile/android/app/build/outputs/apk/release/app-release.apk
+          test -s "$apk"
+          aapt2="$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)aapt2"
+          badging="$("$aapt2" dump badging "$apk" | head -1)"
+          echo "$badging"
+          grep -q "name='org.edgeever.mobile'" <<<"$badging"
+          echo "version=$(sed -n "s/.*versionName='\([^']*\)'.*/\1/p" <<<"$badging")" >> "$GITHUB_OUTPUT"
+          echo "version_code=$(sed -n "s/.*versionCode='\([^']*\)'.*/\1/p" <<<"$badging")" >> "$GITHUB_OUTPUT"
+      # Signed only with the template's debug key: an intermediate for the sign job, not for installing.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: android-apk-unsigned
+          path: apps/mobile/android/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+          retention-days: 1
+
+  # Never on pull requests: only a manual dispatch reaches the keystore.
+  sign:
+    if: github.repository == 'lauchiwa/edgeever' && github.event_name == 'workflow_dispatch'
+    name: Sign the fork APK
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: fork-android
+    steps:
+      # Only for scripts/verify-android-apk-signature.mjs (Node built-ins only).
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v7
+        with:
+          name: android-apk-unsigned
+          path: ${{ runner.temp }}/unsigned
+      - name: Sign with the fork keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.FORK_ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.FORK_ANDROID_KEYSTORE_PASSWORD }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          : "${KEYSTORE_BASE64:?Set the FORK_ANDROID_KEYSTORE_BASE64 secret in the fork-android environment}"
+          : "${KEYSTORE_PASSWORD:?Set the FORK_ANDROID_KEYSTORE_PASSWORD secret in the fork-android environment}"
+          umask 077
+          keystore="${RUNNER_TEMP}/fork-android.p12"
+          trap 'rm -f "${keystore}"' EXIT
+          printf '%s' "${KEYSTORE_BASE64}" | base64 --decode > "${keystore}"
+          apksigner="$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)apksigner"
+          apk="edgeever-fork-android-${VERSION}-${GITHUB_SHA::7}-arm64-v8a.apk"
+          mkdir -p "${RUNNER_TEMP}/signed"
+          "${apksigner}" sign --ks "${keystore}" --ks-type PKCS12 --ks-key-alias edgeever-fork \
+            --ks-pass env:KEYSTORE_PASSWORD --key-pass env:KEYSTORE_PASSWORD --v4-signing-enabled false \
+            --out "${RUNNER_TEMP}/signed/${apk}" "${RUNNER_TEMP}/unsigned/app-release.apk"
+          echo "APK_FILE=${apk}" >> "$GITHUB_ENV"
+      # Fails unless the APK carries exactly one signer: the fork's own certificate.
+      - name: Verify the fork signer
+        env:
+          EDGE_EVER_ANDROID_ALLOWED_SIGNER_SHA256: ${{ vars.FORK_ANDROID_SIGNER_SHA256 }}
+        run: |
+          : "${EDGE_EVER_ANDROID_ALLOWED_SIGNER_SHA256:?Set the FORK_ANDROID_SIGNER_SHA256 repository variable}"
+          apksigner="$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)apksigner"
+          node scripts/verify-android-apk-signature.mjs "${RUNNER_TEMP}/signed/${APK_FILE}" "${apksigner}"
+      - name: Summary
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+          VERSION_CODE: ${{ needs.build.outputs.version_code }}
+        run: |
+          cd "${RUNNER_TEMP}/signed"
+          sha256sum "${APK_FILE}" | tee "${APK_FILE}.sha256"
+          {
+            echo "### Fork Android test APK"
+            echo ""
+            echo "- File: \`${APK_FILE}\`"
+            echo "- Version: ${VERSION} (versionCode ${VERSION_CODE})"
+            echo "- SHA-256: \`$(cut -d' ' -f1 "${APK_FILE}.sha256")\`"
+            echo ""
+            echo "Uninstall the upstream EdgeEver app first: the package name is the same but the signer differs."
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: edgeever-fork-android-apk
+          path: |
+            ${{ runner.temp }}/signed/*.apk
+            ${{ runner.temp }}/signed/*.apk.sha256
+          if-no-files-found: error
+          retention-days: 30

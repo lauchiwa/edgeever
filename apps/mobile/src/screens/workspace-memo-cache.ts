@@ -1,6 +1,7 @@
 import { type InfiniteData, type QueryClient } from "@tanstack/react-query";
 import type { MemoDetail, MemoSummary, Notebook, TiptapDoc } from "@edgeever/shared";
 import { listLocalMemos } from "../lib/local-mirror";
+import { encryptedNoteLocalText } from "../lib/mobile-encrypted-note";
 import { memoHasExactTag } from "../lib/mobile-tags";
 import { markdownToLocalText, sortMemoSummaries } from "./workspace-utils";
 
@@ -20,7 +21,7 @@ export const createOptimisticMemo = (
   payload: MobileMemoUpdatePayload
 ): MemoDetail => {
   const contentMarkdown = payload.contentMarkdown ?? memo.contentMarkdown;
-  const contentText = markdownToLocalText(contentMarkdown);
+  const contentText = encryptedNoteLocalText(contentMarkdown) ?? markdownToLocalText(contentMarkdown);
 
   return {
     ...memo,

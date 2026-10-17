@@ -2,7 +2,7 @@
 
 本仓库是上游 EdgeEver（`tianma-if/edgeever`）的二次开发 fork。它在自己的 Releases 页面构建并发布 Windows 桌面版，已安装的二开客户端只从这里更新。不会向上游写入任何内容。English: [fork-releases.md](fork-releases.md).
 
-当前范围：**Windows x64 桌面端，以及服务端镜像** `ghcr.io/lauchiwa/edgeever`（API 与浏览器 Web 端）。不发布 macOS、Linux、Android 和 iOS 的二开版本（Windows 验证稳定后再支持 Linux）。[加密笔记](encrypted-notes.zh-CN.md)等二开功能需要二开客户端与运行二开镜像的服务端同时具备。
+当前范围：**Windows x64 桌面端，以及服务端镜像** `ghcr.io/lauchiwa/edgeever`（API 与浏览器 Web 端）。不发布 macOS、Linux、Android 和 iOS 的二开版本（Windows 验证稳定后再支持 Linux）。Android 只有作为工作流产物的**测试版**，见 [Android 测试版](#android-测试版)。[加密笔记](encrypted-notes.zh-CN.md)等二开功能需要二开客户端与运行二开镜像的服务端同时具备。
 
 ## 版本号
 
@@ -28,7 +28,8 @@ vX.Y.Z-rc.N
 | 仓库身份 | `apps/desktop/src/main/fork-config.mjs`（渲染端对应 `packages/shared/src/fork-config.ts`） | `scripts/fork-invariants.test.mjs` |
 | 自动更新 | electron-builder 发布到本 fork 并从本 fork 更新；渠道文件为 `rc.yml` | 不变量测试、`windows-update-metadata.test.mjs` |
 | Windows 更新签名 | 只信任本 fork 的 Ed25519 密钥，只接受 `X.Y.Z-rc.N` | `windows-update-trust.test.mjs`、固定的公钥指纹 |
-| 链接 | 诊断、反馈、桌面端下载指向 fork；服务端 Release 说明在二开镜像（`vX.Y.Z-rc.N`）下指向 fork，否则指向上游；保留 5 处有意指向上游的链接（Android APK、上游服务端 Release 说明、插件文档） | 上游地址扫描及白名单 |
+| 链接 | 诊断、反馈、桌面端下载指向 fork；服务端 Release 说明在二开镜像（`vX.Y.Z-rc.N`）下指向 fork，否则指向上游；保留若干有意指向上游的链接（Android APK 下载、上游服务端 Release 说明、插件文档、移动端的上游更新检查与主页链接） | 上游地址扫描及白名单 |
+| Android 测试版 | 沿用包名 `org.edgeever.mobile`，使用二开 keystore；关闭 expo-updates 和应用内 APK 更新，上游 OTA 更新不会替换二开代码；原生解锁加密笔记 | 不变量测试、`fork-workflows.test.mjs`、`fork-android.yml` 中的 manifest 检查 |
 | ACP | Windows ACP 修复 | ACP 测试、不变量测试 |
 | 加密笔记 | 客户端加密；服务端拒绝明文覆盖，并通告 `features.encryptedNotes` | `encrypted-note*.test.mjs`、`tests/e2e/encrypted-note.spec.ts` |
 | 服务端镜像 | `fork-docker-image.yml` 只发布 rc tag，从不发布 `latest` | `fork-workflows.test.mjs` |
@@ -128,6 +129,35 @@ curl -fsS http://127.0.0.1:8787/api/v1/auth/session   # 应包含 features.encry
 先用 `docker volume ls` 确认数据卷名称。**不要切换到 `X.Y.Z` 低于服务器当前上游版本的二开镜像**，应先同步上游。
 
 回滚：停止服务，把 `EDGE_EVER_IMAGE` 和 `EDGE_EVER_VERSION` 恢复为原值，将 `/data` 备份恢复到空数据卷，然后重新启动。在上游镜像下加密笔记仍是密文：只有切回二开镜像后才能读取，在上游版本中编辑它们会将其覆盖。
+
+## Android 测试版
+
+`fork-android.yml` 构建一个 arm64-v8a APK，供手工测试。它不是 Release 资产，也不会自动更新。
+
+- 修改了移动端的 PR 只运行 `build`：类型检查、加密笔记测试、prebuild、检查 expo-updates 已关闭，以及 Gradle release 构建。这里读不到任何 Secret。
+- 在 Actions → Fork Android test build → Run workflow（选 `main`）手动运行时，还会运行 `sign`。它在 `fork-android` Environment 中运行，不安装任何依赖，用二开 keystore 签名 APK，并且只有唯一签名者与 `FORK_ANDROID_SIGNER_SHA256` 一致时才通过。从该运行下载 `edgeever-fork-android-apk`（保留 30 天），摘要中给出其 SHA-256。
+
+一次性配置 keystore，由维护者本人完成（PowerShell；代理不读取 keystore 及其口令）：
+
+1. 创建 Environment：Settings → Environments → New environment `fork-android`，部署分支限制为 `main`。
+2. 生成密钥（`keytool` 会提示输入口令；PKCS12 的密钥口令与之相同）：
+
+   ```powershell
+   keytool -genkeypair -v -storetype PKCS12 -keystore "$HOME\.config\edgeever-fork\android-fork.p12" -alias edgeever-fork -keyalg RSA -keysize 4096 -validity 10000 -dname "CN=EdgeEver fork"
+   keytool -list -v -keystore "$HOME\.config\edgeever-fork\android-fork.p12" -alias edgeever-fork
+   ```
+
+3. 保存到 GitHub（通过标准输入传递，keystore 不出现在命令行中；口令为隐藏输入）。变量值取上一步输出的 `SHA256:` 一行：
+
+   ```powershell
+   [Convert]::ToBase64String([IO.File]::ReadAllBytes("$HOME\.config\edgeever-fork\android-fork.p12")) | gh secret set FORK_ANDROID_KEYSTORE_BASE64 --env fork-android -R lauchiwa/edgeever
+   gh secret set FORK_ANDROID_KEYSTORE_PASSWORD --env fork-android -R lauchiwa/edgeever
+   gh variable set FORK_ANDROID_SIGNER_SHA256 -R lauchiwa/edgeever --body "<SHA256 指纹>"
+   ```
+
+4. 把 `.p12` 文件及其口令备份到离线位置。丢失后，新构建无法覆盖安装当前版本，只能卸载应用，本地缓存随之丢失（服务端数据不受影响）。
+
+安装：包名与上游相同但签名不同，Android 会拒绝覆盖安装上游应用。先卸载上游应用（其本地缓存和尚未发送的离线修改会丢失），再安装二开 APK 并重新登录。之后的二开构建可以互相覆盖安装。
 
 ## 已安装的客户端
 

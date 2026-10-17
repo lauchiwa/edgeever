@@ -16,3 +16,5 @@ modules/edgeever-keyboard/android/build/
 modules/edgeever-app-installer/android/build/
 !modules/edgeever-app-store/android/
 modules/edgeever-app-store/android/build/
+!modules/edgeever-crypto/android/
+modules/edgeever-crypto/android/build/
