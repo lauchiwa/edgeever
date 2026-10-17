@@ -48,6 +48,9 @@ import {
 } from "@/lib/mobile-editor";
 import { cn } from "@/lib/utils";
 import { isBrowserOffline, isBrowserOnline } from "@/lib/network-status";
+import { ENCRYPTED_NOTE_PLACEHOLDER_TEXT, encryptedNotePlaceholderDoc, hasEncryptedNoteMarker } from "@edgeever/shared";
+import { encryptWithEncryptedNoteVault, isEncryptedNoteVaultUnlocked } from "@/lib/encrypted-note-vault";
+import { EncryptedNoteCreateDialog } from "./EncryptedNoteCreateDialog";
 import { createDefaultDiagramDocument, createDefaultInfographicDocument, hasPosterDocumentMarker, posterFallbackMarkdown, serializePosterDocument, createDefaultTableDocument, diagramFallbackMarkdown, getNotebookScopeIds, hasTableDocumentMarker, infographicFallbackMarkdown, markdownToDoc, parseDiagramDocument, parseInfographicDocument, parseTableDocument, serializeDiagramDocument, serializeInfographicDocument, serializeTableDocument, tableFallbackMarkdown, type NoteCreateKind, type Notebook, type AuthUser, type MemoSummary, type MemoDetail, type MemoTemplate as SavedMemoTemplate } from "@edgeever/shared";
 import { toggleMobileMemoSelection } from "@edgeever/shared/mobile-ui";
 import type {
@@ -151,6 +154,7 @@ const DiagramEditorPane = lazy(() => import("./DiagramEditorPane"));
 const TableEditorPane = lazy(() => import("./TableEditorPane"));
 const PosterEditorPane = lazy(() => import("./PosterEditorPane"));
 const InfographicEditorPane = lazy(() => import("./InfographicEditorPane"));
+const EncryptedNotePane = lazy(() => import("./EncryptedNotePane"));
 const AssetsPane = lazy(() => import("./AssetsPane").then((module) => ({ default: module.AssetsPane })));
 const SettingsPane = lazy(() => import("./SettingsPane").then((module) => ({ default: module.SettingsPane })));
 const PluginMarketplacePane = lazy(() => import("./PluginMarketplacePane").then((module) => ({ default: module.PluginMarketplacePane })));
@@ -177,12 +181,15 @@ export const WorkspaceApp = ({
   user,
   isLoggingOut,
   onLogout,
+  encryptedNotesSupported = false,
 }: {
   authRequired: boolean;
   demoMode: boolean;
   user: AuthUser | null;
   isLoggingOut: boolean;
   onLogout: () => void;
+  /** Only servers built from this fork guard encrypted notes against overwrite. */
+  encryptedNotesSupported?: boolean;
 }) => {
   const { t, i18n } = useTranslation();
   const queryClient = useQueryClient();
@@ -258,6 +265,7 @@ export const WorkspaceApp = ({
   const [notebookNameDialog, setNotebookNameDialog] = useState<NotebookNameDialogState | null>(null);
   const [notebookDeleteConfirmation, setNotebookDeleteConfirmation] = useState<Notebook | null>(null);
   const [appNoticeDialog, setAppNoticeDialog] = useState<AppNoticeDialogState | null>(null);
+  const [encryptedNoteCreateOpen, setEncryptedNoteCreateOpen] = useState(false);
   const [wechatImportFailureId, setWeChatImportFailureId] = useState<string | null>(null);
   const [wechatImportsInProgress, setWeChatImportsInProgress] = useState(0);
   const [sharedFileImportsInProgress, setSharedFileImportsInProgress] = useState(0);
@@ -1270,7 +1278,7 @@ export const WorkspaceApp = ({
 
   const revealCreatedMemo = (memo: MemoDetail) => {
     const targetNotebookId = memo.notebookId;
-    const isStructuredNote = Boolean(parseDiagramDocument(memo.contentMarkdown) || parseTableDocument(memo.contentMarkdown) || parseInfographicDocument(memo.contentMarkdown) || hasPosterDocumentMarker(memo.contentMarkdown));
+    const isStructuredNote = Boolean(parseDiagramDocument(memo.contentMarkdown) || parseTableDocument(memo.contentMarkdown) || parseInfographicDocument(memo.contentMarkdown) || hasPosterDocumentMarker(memo.contentMarkdown) || hasEncryptedNoteMarker(memo.contentMarkdown));
 
     setMemoView("notebook");
     setSearch("");
@@ -1526,6 +1534,7 @@ export const WorkspaceApp = ({
   const selectedDiagram = parseDiagramDocument(selectedMemo?.contentMarkdown);
   const selectedTableNote = hasTableDocumentMarker(selectedMemo?.contentMarkdown);
   const selectedPosterNote = hasPosterDocumentMarker(selectedMemo?.contentMarkdown);
+  const selectedEncryptedNote = hasEncryptedNoteMarker(selectedMemo?.contentMarkdown);
   const selectedInfographicNote = Boolean(parseInfographicDocument(selectedMemo?.contentMarkdown));
   const desktopNotebookSidebarCollapsed = Boolean(isDesktop && notebookSidebarCollapsed);
   const desktopFocusModeActive = Boolean(
@@ -1913,10 +1922,46 @@ export const WorkspaceApp = ({
     for (const payload of pending) void handleImportWeChatChat(payload);
   }, [handleImportWeChatChat]);
 
+  const createEncryptedMemo = async () => {
+    const targetNotebookId = createMemoNotebookId;
+    if (!targetNotebookId || memoView === "trash" || createMemoInFlightRef.current || createMemoMutation.isPending) return;
+    createMemoInFlightRef.current = true;
+    try {
+      const { contentMarkdown } = await encryptWithEncryptedNoteVault({ type: "doc", content: [{ type: "paragraph" }] });
+      setTemplatesOpen(false);
+      setMobileBottomNavActive("home");
+      creatingMemoSelectionRef.current = true;
+      await createMemoMutation.mutateAsync({
+        notebookId: targetNotebookId,
+        title: t("encryptedNote.name"),
+        contentJson: encryptedNotePlaceholderDoc(),
+        contentMarkdown,
+        tags: [],
+      });
+    } finally {
+      createMemoInFlightRef.current = false;
+    }
+  };
+
   const handleCreateMemo = (kind?: NoteCreateKind) => {
     const targetNotebookId = createMemoNotebookId;
 
     if (!targetNotebookId || memoView === "trash") {
+      return;
+    }
+
+    if (kind === "encrypted") {
+      if (!encryptedNotesSupported) {
+        setAppNoticeDialog({ title: t("encryptedNote.name"), description: t("encryptedNote.unsupportedServer") });
+        return;
+      }
+      if (isEncryptedNoteVaultUnlocked()) {
+        void createEncryptedMemo().catch(() => {
+          setAppNoticeDialog({ title: t("encryptedNote.name"), description: t("encryptedNote.saveError") });
+        });
+      } else {
+        setEncryptedNoteCreateOpen(true);
+      }
       return;
     }
 
@@ -2148,6 +2193,11 @@ export const WorkspaceApp = ({
 
   const handleMerge = () => {
     if (selectedMemoIds.size < 2 || memoView === "trash") {
+      return;
+    }
+    // The desktop sidecar merges locally, so the server guard alone cannot stop it.
+    if (memos.some((memo) => selectedMemoIds.has(memo.id) && memo.excerpt === ENCRYPTED_NOTE_PLACEHOLDER_TEXT)) {
+      setAppNoticeDialog({ title: t("encryptedNote.name"), description: t("encryptedNote.unsupportedFeatures") });
       return;
     }
 
@@ -3526,7 +3576,33 @@ export const WorkspaceApp = ({
                         setActivePane("memos");
                       }}
                     >
-                      {selectedMemo && selectedDiagram ? (
+                      {selectedMemo && selectedEncryptedNote ? (
+                        <EncryptedNotePane
+                          key={selectedMemo.id}
+                          memo={selectedMemo}
+                          notebooks={notebooks}
+                          repository={repository}
+                          scope={localDataScope}
+                          readOnly={memoView === "trash" || selectedMemo.isDeleted}
+                          desktopFocusMode={desktopFocusModeActive}
+                          onBackToList={() => {
+                            clearPendingCreatedMemo();
+                            setSelectedMemoId(null);
+                            setActivePane("memos");
+                          }}
+                          onOpenExecutionCenter={handleOpenExecutionCenter}
+                          onToggleDesktopFocusMode={toggleDesktopFocusMode}
+                          onSaved={async (memo) => {
+                            await putLocalMemo(localDataScope, memo);
+                            cacheMemoDetail(queryClient, memo, memoView);
+                            updateMemoSummaryInLists(queryClient, memoToSummary(memo));
+                            await Promise.all([
+                              queryClient.invalidateQueries({ queryKey: ["memos"], refetchType: "inactive" }),
+                              queryClient.invalidateQueries({ queryKey: ["notebooks"], refetchType: "inactive" }),
+                            ]);
+                          }}
+                        />
+                      ) : selectedMemo && selectedDiagram ? (
                         <DiagramEditorPane
                           memo={selectedMemo}
                           notebooks={notebooks}
@@ -3834,6 +3910,12 @@ export const WorkspaceApp = ({
           }}
         />
       )}
+      <EncryptedNoteCreateDialog
+        open={encryptedNoteCreateOpen}
+        scope={localDataScope}
+        onOpenChange={setEncryptedNoteCreateOpen}
+        onConfirmed={createEncryptedMemo}
+      />
       {appNoticeDialog && (
         <AppConfirmDialog
           title={appNoticeDialog.title}

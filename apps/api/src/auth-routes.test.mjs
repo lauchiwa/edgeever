@@ -84,6 +84,7 @@ describe("auth route contracts", () => {
         displayName: "Owner",
         role: "owner",
       },
+      features: { encryptedNotes: true },
     });
   });
 

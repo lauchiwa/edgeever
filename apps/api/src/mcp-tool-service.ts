@@ -2,6 +2,7 @@ import { requestPosterRender, readPosterRenderJob, posterRenderJob } from "./pos
 import { applyPosterEdits, compilePosterMemo, posterCapabilities } from "./mcp-poster-tools";
 import { resolveObjectStorage } from "./object-storage";
 import { hasPosterDocumentMarker, parsePosterDocument, serializePosterDocument } from "@edgeever/shared";
+import { isEncryptedNoteMarkdown, redactEncryptedMemo } from "./encrypted-note-guard";
 import {
   AiPromptTemplateCreateSchema,
   AiPromptTemplateUpdateSchema,
@@ -316,6 +317,7 @@ export const callMcpTool = async (
         throw new Error("Memo not found");
       }
 
+      if (isEncryptedNoteMarkdown(memo.contentMarkdown)) return { memo: redactEncryptedMemo(memo) };
       const diagram = parseDiagramDocument(memo.contentMarkdown);
       if (diagram) return { memo: memoWithoutDiagramPayload(memo), diagram: diagramSemanticGraph(diagram) };
       const table = parseTableDocument(memo.contentMarkdown);
@@ -683,6 +685,9 @@ export const callMcpTool = async (
             "Structured table content cannot be replaced through update_memo.",
             400,
           );
+        }
+        if (existing && isEncryptedNoteMarkdown(existing.contentMarkdown)) {
+          throw new AppError("encrypted_update_required", "Encrypted note content cannot be read or replaced through MCP.", 400);
         }
         if (existing && hasPosterDocumentMarker(existing.contentMarkdown)) {
           throw new AppError("poster_update_required", "Poster content cannot be replaced through update_memo. Use get_poster then update_poster.", 400);

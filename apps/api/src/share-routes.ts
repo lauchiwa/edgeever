@@ -5,6 +5,7 @@ import type { AppContext, AppEnv } from "./api-context";
 import { audit } from "./audit";
 import { hashPassword, randomToken, verifyPassword } from "./auth-crypto";
 import { parseByteRange, rangeNotSatisfiable } from "./byte-range";
+import { isEncryptedNoteMarkdown } from "./encrypted-note-guard";
 import { createId, isoNow, parseJsonArray } from "./entity-utils";
 import { apiError, notFound } from "./http-errors";
 import { resolveObjectStorage } from "./object-storage";
@@ -180,7 +181,7 @@ export const registerPublicShareRoutes = (app: Hono<AppEnv>) => {
        WHERE ms.token = ? AND m.is_deleted = 0
        LIMIT 1`
     ).bind(token).first<PublicMemoShareRow>();
-    if (!row) return notFound(c, "Shared note not found");
+    if (!row || isEncryptedNoteMarkdown(row.content_markdown)) return notFound(c, "Shared note not found");
     if (row.password_hash && !(await allowPasswordProtectedShare(c, token, row.password_hash))) {
       return sharePasswordRequired(c);
     }
@@ -386,9 +387,14 @@ export const registerMemoShareRoutes = (app: Hono<AppEnv>) => {
     const memoId = c.req.param("id");
     const workspaceId = getWorkspaceId(c);
     const memo = await c.env.storage.db.prepare(
-      `SELECT id FROM memos WHERE id = ? AND workspace_id = ? AND is_deleted = 0`
-    ).bind(memoId, workspaceId).first<{ id: string }>();
+      `SELECT m.id, mc.content_markdown FROM memos m
+       INNER JOIN memo_contents mc ON mc.memo_id = m.id
+       WHERE m.id = ? AND m.workspace_id = ? AND m.is_deleted = 0`
+    ).bind(memoId, workspaceId).first<{ id: string; content_markdown: string }>();
     if (!memo) return notFound(c, "Memo not found");
+    if (isEncryptedNoteMarkdown(memo.content_markdown)) {
+      return apiError(c, "encrypted_note_unsupported", "Encrypted notes cannot be shared.", 409);
+    }
 
     const existing = await c.env.storage.db.prepare(selectMemoShareSql)
       .bind(memoId, workspaceId).first<MemoShareRow>();

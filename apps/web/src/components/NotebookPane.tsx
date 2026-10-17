@@ -32,6 +32,7 @@ import {
   ExternalLink,
   RotateCcw,
   FileText,
+  LockKeyhole,
   Workflow,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -357,6 +358,10 @@ const CreateMemoTypeItems = ({ onCreateMemo }: { onCreateMemo: (kind?: NoteCreat
       <DropdownMenuItem className="gap-2 text-xs leading-5" onSelect={() => onCreateMemo("table")}>
         <Table2 className="h-4 w-4 shrink-0" />
         <span className="min-w-0 flex-1 truncate">{t("structuredTable.name")}</span>
+      </DropdownMenuItem>
+      <DropdownMenuItem className="gap-2 text-xs leading-5" onSelect={() => onCreateMemo("encrypted")}>
+        <LockKeyhole className="h-4 w-4 shrink-0" />
+        <span className="min-w-0 flex-1 truncate">{t("encryptedNote.name")}</span>
       </DropdownMenuItem>
     </>
   );

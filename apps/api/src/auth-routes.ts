@@ -26,6 +26,7 @@ import type {
 } from "./api-context";
 import { hashPassword, verifyPassword } from "./auth-crypto";
 import type { InstanceAuthMode } from "./auth-state";
+import { ENCRYPTED_NOTE_CAPABILITY } from "./encrypted-note-guard";
 import { isoNow } from "./entity-utils";
 import {
   apiError,
@@ -35,6 +36,9 @@ import {
   unauthorized,
 } from "./http-errors";
 import type { DatabaseAdapter } from "./storage-contract";
+
+// Advertised so fork clients can refuse features an upstream server cannot guard.
+const SERVER_FEATURES = { encryptedNotes: ENCRYPTED_NOTE_CAPABILITY };
 
 export type UserRow = {
   id: string;
@@ -109,6 +113,7 @@ export const registerAuthRoutes = (
           displayName: "Owner",
           role: "owner",
         },
+        features: SERVER_FEATURES,
       });
     }
 
@@ -123,6 +128,7 @@ export const registerAuthRoutes = (
         displayName: auth.displayName,
         role: auth.role,
       } : null,
+      features: SERVER_FEATURES,
     });
   });
 

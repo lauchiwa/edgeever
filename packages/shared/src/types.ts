@@ -3,7 +3,7 @@ import type { AiAction, AiPromptParameterKind, AiPromptResultMode } from "./ai-a
 import type { DiagramKind, DiagramSummaryPreview } from "./diagram";
 import type { TableSummaryPreview } from "./table";
 
-export type NoteCreateKind = DiagramKind | "infographic" | "table" | "poster";
+export type NoteCreateKind = DiagramKind | "infographic" | "table" | "poster" | "encrypted";
 
 export type Notebook = {
   id: string;
@@ -314,6 +314,8 @@ export type AuthSession = {
   demoMode: boolean;
   user: AuthUser | null;
   sessionToken?: string;
+  /** Server-side capabilities; absent on upstream servers. */
+  features?: { encryptedNotes?: boolean };
 };
 
 export type LoginDeviceSession = {

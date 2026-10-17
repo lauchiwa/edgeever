@@ -8,7 +8,7 @@ import { FORK_REPOSITORY } from "../apps/desktop/src/main/fork-config.mjs";
 
 const root = join(import.meta.dir, "..");
 const workflow = (name) => readFileSync(join(root, ".github/workflows", name), "utf8");
-const FORK_WORKFLOWS = ["fork-ci.yml", "fork-release.yml", "fork-upstream-watch.yml"];
+const FORK_WORKFLOWS = ["fork-ci.yml", "fork-docker-image.yml", "fork-release.yml", "fork-upstream-watch.yml"];
 
 describe("fork workflows", () => {
   test("every job runs only in this fork", () => {
@@ -88,6 +88,25 @@ describe("fork workflows", () => {
     expect(Math.min(gates, apply, build)).toBeGreaterThan(-1);
     expect(gates).toBeLessThan(apply);
     expect(apply).toBeLessThan(build);
+  });
+
+  // The server image ships the same reviewed rc tag as the desktop release and
+  // never reaches the signing key or upstream's :latest channel.
+  test("the server image workflow builds only rc tags from main, without secrets beyond the GHCR token", () => {
+    const text = workflow("fork-docker-image.yml");
+    const { test: verify, publish, ...others } = jobsOf(text);
+    expect(Object.keys(others)).toEqual([]);
+    expect(text).toMatch(/tags:\s*\n\s*- "v\*-rc\.\*"/);
+    expect(text).toMatch(/^permissions:\s*\n\s*contents: read\s*\n/m);
+    expect(text).not.toMatch(/environment:|SIGNING|contents: write/);
+    expect([...text.matchAll(/secrets\.(\w+)/g)].map((match) => match[1])).toEqual(["GITHUB_TOKEN"]);
+    expect(verify).toContain("fork-release-version.mjs check");
+    expect(verify).toContain("merge-base --is-ancestor");
+    expect(verify).toContain(".features.encryptedNotes == true");
+    expect(publish).toMatch(/^    needs: test\s*$/m);
+    expect(publish).toContain('image="ghcr.io/${GITHUB_REPOSITORY,,}"');
+    const code = text.split("\n").filter((line) => !/^\s*#/.test(line)).join("\n");
+    expect(code).not.toMatch(/:latest\b|tianma-if/);
   });
 
   test("CI and the watcher are read-only", () => {

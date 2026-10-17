@@ -64,6 +64,7 @@ export { attachDiagramScroll } from "./diagram-scroll";
 export * from "./front-matter";
 
 export * from "./poster";
+export * from "./encrypted-note";
 
 export * from "./poster-fonts";
 export * from "./poster-platforms";

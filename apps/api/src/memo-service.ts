@@ -23,6 +23,7 @@ import {
 import { auditStatement } from "./audit";
 import type { AppContext, AuditActor, AuthContext, Bindings } from "./api-context";
 import { AppError } from "./app-error";
+import { assertNotEncryptedNote, encryptedNoteUpdateError, redactEncryptedMemo, resolveEncryptedNoteContent } from "./encrypted-note-guard";
 import { clampNumber, createId, isoNow, parseJsonArray } from "./entity-utils";
 import { workspaceInboxId } from "./notebook-service";
 import { sha256 } from "./hash-utils";
@@ -321,7 +322,7 @@ export const listMemosForMcp = async (
       )
       .bind(options.workspaceId, notebookId, notebookId, pageSize, offset)
       .all<MemoDetailRow>();
-    const page = rows.results.slice(0, limit).map(mapMemoDetail);
+    const page = rows.results.slice(0, limit).map((row) => redactEncryptedMemo(mapMemoDetail(row)));
 
     return {
       memos: page,
@@ -866,6 +867,7 @@ export const mergeMemosRecord = async (
   const ordered = uniqueMemoIds
     .map((memoId) => rows.results.find((row) => row.id === memoId))
     .filter((row): row is MemoDetailRow => Boolean(row));
+  for (const row of ordered) assertNotEncryptedNote(row.content_markdown, "merged");
   const notebookId = input.notebookId ?? ordered[0].notebook_id;
   const title = resolveMergedMemoTitle(input.title, ordered);
   const sourceDocs = ordered.map((memo) => {
@@ -964,9 +966,14 @@ export const createMemoRecord = async (
   }
   const tags = normalizeTags(input.tags);
   const contentMarkdown = input.contentMarkdown ?? "";
-  const contentJson = input.contentJson && typeof input.contentJson === "object"
-    ? input.contentJson as TiptapDoc
-    : markdownToDoc(contentMarkdown);
+  const encryptedContent = resolveEncryptedNoteContent(contentMarkdown);
+  if (encryptedContent?.error) {
+    throw new AppError(encryptedContent.error, encryptedContent.message, encryptedContent.status);
+  }
+  const contentJson = encryptedContent?.contentJson
+    ?? (input.contentJson && typeof input.contentJson === "object"
+      ? input.contentJson as TiptapDoc
+      : markdownToDoc(contentMarkdown));
   const contentText = docToText(contentJson);
   const title = normalizeMemoTitle(input.title);
   const excerpt = createExcerpt(contentText);
@@ -1329,7 +1336,7 @@ export const updateMemoRecord = async (
   }
 
   const currentContentJson = parseDoc(current.content_json);
-  const contentJson =
+  const requestedContentJson =
     input.contentJson !== undefined
       ? input.contentJson
       : input.contentMarkdown !== undefined
@@ -1339,8 +1346,13 @@ export const updateMemoRecord = async (
     input.contentMarkdown !== undefined
       ? input.contentMarkdown
       : input.contentJson !== undefined
-        ? docToMarkdown(contentJson)
+        ? docToMarkdown(requestedContentJson)
         : current.content_markdown;
+  const encryptedUpdateError = encryptedNoteUpdateError(current.content_markdown, contentMarkdown, hasDocumentUpdate);
+  if (encryptedUpdateError) return encryptedUpdateError;
+  const encryptedContent = hasDocumentUpdate ? resolveEncryptedNoteContent(contentMarkdown) : null;
+  if (encryptedContent?.error) return encryptedContent;
+  const contentJson = encryptedContent?.contentJson ?? requestedContentJson;
   const contentText = hasDocumentUpdate ? docToText(contentJson) : current.content_text;
   const title =
     input.title !== undefined ? normalizeMemoTitle(input.title) : normalizeMemoTitle(current.title);

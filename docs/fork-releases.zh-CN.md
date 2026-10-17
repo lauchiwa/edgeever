@@ -2,7 +2,7 @@
 
 本仓库是上游 EdgeEver（`tianma-if/edgeever`）的二次开发 fork。它在自己的 Releases 页面构建并发布 Windows 桌面版，已安装的二开客户端只从这里更新。不会向上游写入任何内容。English: [fork-releases.md](fork-releases.md).
 
-当前范围：**仅 Windows x64 桌面端。**不发布 macOS、Linux、Android 和 iOS 的二开版本（Windows 验证稳定后再支持 Linux）。
+当前范围：**Windows x64 桌面端，以及服务端镜像** `ghcr.io/lauchiwa/edgeever`（API 与浏览器 Web 端）。不发布 macOS、Linux、Android 和 iOS 的二开版本（Windows 验证稳定后再支持 Linux）。[加密笔记](encrypted-notes.zh-CN.md)等二开功能需要二开客户端与运行二开镜像的服务端同时具备。
 
 ## 版本号
 
@@ -30,6 +30,8 @@ vX.Y.Z-rc.N
 | Windows 更新签名 | 只信任本 fork 的 Ed25519 密钥，只接受 `X.Y.Z-rc.N` | `windows-update-trust.test.mjs`、固定的公钥指纹 |
 | 链接 | 诊断、反馈、桌面端下载指向 fork；保留 5 处有意指向上游的链接（Android APK、服务端 Release 说明、插件文档） | 上游地址扫描及白名单 |
 | ACP | Windows ACP 修复 | ACP 测试、不变量测试 |
+| 加密笔记 | 客户端加密；服务端拒绝明文覆盖，并通告 `features.encryptedNotes` | `encrypted-note*.test.mjs`、`tests/e2e/encrypted-note.spec.ts` |
+| 服务端镜像 | `fork-docker-image.yml` 只发布 rc tag，从不发布 `latest` | `fork-workflows.test.mjs` |
 
 需要不变量测试，是因为上游合并可能没有冲突，却悄悄撤销二开逻辑，例如新增一处写死 `tianma-if/edgeever` 的代码。
 
@@ -92,7 +94,40 @@ vX.Y.Z-rc.N
    node scripts/fork-sign-release.mjs v1.119.0-rc.0 --publish
    ```
 
+同一个 tag 还会触发 `fork-docker-image.yml` 构建服务端镜像（见下文）。两个工作流互相独立：镜像构建失败不会阻塞 Windows 发布，可以用同一个 tag 手动运行该工作流重建。
+
 基线版本打错的 tag 不需要删除，发布一个正确且更高的 tag 即可。**不要删除或重新签名已发布的版本。**
+
+## 服务端镜像
+
+`fork-docker-image.yml` 在 `main` 上的每个 `vX.Y.Z-rc.N` tag 上运行：
+
+- `test` 构建并运行镜像，检查健康状态、Web 端、`/data` 下的 SQLite、`features.encryptedNotes` 以及优雅退出。
+- `publish` 把 `linux/amd64` 和 `linux/arm64` 推送到 `ghcr.io/lauchiwa/edgeever`，然后重新拉取并运行已推送的镜像。
+
+镜像 tag：`:vX.Y.Z-rc.N`、`:X.Y.Z-rc.N`，以及跟随最高 rc tag 移动的 `:rc`。**从不发布 `:latest`**，因此仍使用上游默认值的服务端不会意外拉到二开镜像，反之亦然。
+
+新建的 GHCR 包通常默认私有；匿名拉取失败时，`publish` 摘要会给出警告。可以将其设为公开（GitHub → Packages → edgeever → Package settings → Change visibility），或在服务器上用具有 `read:packages` 权限的令牌执行 `docker login ghcr.io`。
+
+### 将服务端切换到二开镜像
+
+安装器每天运行的 `update.sh` 会沿用 `~/edgeever/.env` 中指定的镜像，所以切换只需改该文件中的两行。**先做冷备份：**如果二开镜像的上游基线较旧，它会运行在已被更新的上游镜像迁移过的数据库上。
+
+```sh
+cd ~/edgeever
+docker compose --env-file .env stop edgeever
+docker run --rm -v edgeever_edgeever-data:/data -v "$PWD":/backup alpine \
+  tar czf /backup/edgeever-data-$(date +%Y%m%d%H%M).tgz -C /data .
+# 修改 .env：
+#   EDGE_EVER_IMAGE='ghcr.io/lauchiwa/edgeever'
+#   EDGE_EVER_VERSION='v1.119.0-rc.4'   # 固定版本；或写 'rc' 跟随二开发布
+docker compose --env-file .env pull && docker compose --env-file .env up -d
+curl -fsS http://127.0.0.1:8787/api/v1/auth/session   # 应包含 features.encryptedNotes: true
+```
+
+先用 `docker volume ls` 确认数据卷名称。**不要切换到 `X.Y.Z` 低于服务器当前上游版本的二开镜像**，应先同步上游。
+
+回滚：停止服务，把 `EDGE_EVER_IMAGE` 和 `EDGE_EVER_VERSION` 恢复为原值，将 `/data` 备份恢复到空数据卷，然后重新启动。在上游镜像下加密笔记仍是密文：只有切回二开镜像后才能读取，在上游版本中编辑它们会将其覆盖。
 
 ## 已安装的客户端
 

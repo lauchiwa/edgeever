@@ -97,7 +97,7 @@ export const findLocalD1DatabasePaths = (statePath = LOCAL_DEV_STATE_PATH) => {
   const directory = resolve(statePath, "v3/d1/miniflare-D1DatabaseObject");
   if (!existsSync(directory)) return [];
   return Array.from(new Bun.Glob("*.sqlite").scanSync({ cwd: directory, absolute: true }))
-    .filter((path) => !path.endsWith("/metadata.sqlite"))
+    .filter((path) => !path.endsWith(`${sep}metadata.sqlite`) && !path.endsWith("/metadata.sqlite"))
     .sort();
 };
 
