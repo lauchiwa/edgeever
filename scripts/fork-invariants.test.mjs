@@ -56,6 +56,7 @@ describe("fork identity", () => {
     for (const name of ["FORK_REPOSITORY", "FORK_REPOSITORY_URL", "FORK_RELEASES_URL", "FORK_NEW_ISSUE_URL"]) {
       expect(sharedForkConfig[name]).toBe({ FORK_REPOSITORY, FORK_REPOSITORY_URL, FORK_RELEASES_URL, FORK_NEW_ISSUE_URL }[name]);
     }
+    expect(String(sharedForkConfig.FORK_VERSION_PATTERN)).toBe(String(FORK_VERSION_PATTERN));
     // /releases/latest omits pre-releases, and every fork release is one.
     expect(FORK_RELEASES_URL).not.toContain("/latest");
   });
