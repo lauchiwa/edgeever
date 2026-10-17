@@ -1,5 +1,15 @@
 import { describe, expect, test } from "bun:test";
-import { findDesktopReleaseVersion, getReleaseTagForVersion, isClientAheadOfInstance, isVersionOutdated, resolveLocalizedReleaseChanges } from "./version-check";
+import { findDesktopReleaseVersion, getForkReleaseUrlForTag, getReleaseTagForVersion, isClientAheadOfInstance, isVersionOutdated, resolveLocalizedReleaseChanges } from "./version-check";
+
+describe("fork release links", () => {
+  test("links fork rc tags to the fork's release and leaves other tags to upstream", () => {
+    expect(getForkReleaseUrlForTag("v1.120.0-rc.0")).toBe("https://github.com/lauchiwa/edgeever/releases/tag/v1.120.0-rc.0");
+    expect(getForkReleaseUrlForTag(getReleaseTagForVersion("1.120.0-rc.12+7"))).toBe("https://github.com/lauchiwa/edgeever/releases/tag/v1.120.0-rc.12");
+    for (const tag of ["v1.120.0", "v1.35.0-beta.2", "v1.120.0-rc.01", null]) {
+      expect(getForkReleaseUrlForTag(tag)).toBeNull();
+    }
+  });
+});
 
 describe("platform release version checks", () => {
   test("derives the installed desktop version from the DMG asset", () => {

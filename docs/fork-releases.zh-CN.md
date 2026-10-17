@@ -28,7 +28,7 @@ vX.Y.Z-rc.N
 | 仓库身份 | `apps/desktop/src/main/fork-config.mjs`（渲染端对应 `packages/shared/src/fork-config.ts`） | `scripts/fork-invariants.test.mjs` |
 | 自动更新 | electron-builder 发布到本 fork 并从本 fork 更新；渠道文件为 `rc.yml` | 不变量测试、`windows-update-metadata.test.mjs` |
 | Windows 更新签名 | 只信任本 fork 的 Ed25519 密钥，只接受 `X.Y.Z-rc.N` | `windows-update-trust.test.mjs`、固定的公钥指纹 |
-| 链接 | 诊断、反馈、桌面端下载指向 fork；保留 5 处有意指向上游的链接（Android APK、服务端 Release 说明、插件文档） | 上游地址扫描及白名单 |
+| 链接 | 诊断、反馈、桌面端下载指向 fork；服务端 Release 说明在二开镜像（`vX.Y.Z-rc.N`）下指向 fork，否则指向上游；保留 5 处有意指向上游的链接（Android APK、上游服务端 Release 说明、插件文档） | 上游地址扫描及白名单 |
 | ACP | Windows ACP 修复 | ACP 测试、不变量测试 |
 | 加密笔记 | 客户端加密；服务端拒绝明文覆盖，并通告 `features.encryptedNotes` | `encrypted-note*.test.mjs`、`tests/e2e/encrypted-note.spec.ts` |
 | 服务端镜像 | `fork-docker-image.yml` 只发布 rc tag，从不发布 `latest` | `fork-workflows.test.mjs` |

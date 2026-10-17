@@ -1,4 +1,6 @@
-const DESKTOP_ASSET_PATTERN = /^EdgeEver-(\d+\.\d+\.\d+)-mac-(arm64|x64)\.dmg$/;
+import { FORK_RELEASES_URL, FORK_VERSION_PATTERN } from "@edgeever/shared";
+
+const DESKTOP_ASSET_PATTERN =/^EdgeEver-(\d+\.\d+\.\d+)-mac-(arm64|x64)\.dmg$/;
 
 export const findDesktopReleaseVersion = (assetNames: string[]) => {
   const versions = new Map<string, string>();
@@ -22,6 +24,13 @@ export const getReleaseTagForVersion = (version: string) => {
   const match = version.match(/^v?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)(?:\+[0-9A-Za-z.-]+)?$/i);
   return match ? `v${match[1]}` : null;
 };
+
+// A server built from this fork reports vX.Y.Z-rc.N, which exists only on the
+// fork's Releases page; any other tag is an upstream release.
+export const getForkReleaseUrlForTag = (tag: string | null) =>
+  tag && FORK_VERSION_PATTERN.test(tag.replace(/^v/, ""))
+    ? `${FORK_RELEASES_URL}/tag/${encodeURIComponent(tag)}`
+    : null;
 
 const normalizeLocale = (locale: string) => locale.trim().replaceAll("_", "-").toLowerCase();
 

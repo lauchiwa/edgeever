@@ -42,7 +42,7 @@ refuses a base below one already released.
 | Identity | `apps/desktop/src/main/fork-config.mjs` (+ renderer mirror `packages/shared/src/fork-config.ts`) | `scripts/fork-invariants.test.mjs` |
 | Updates | electron-builder publishes to and updates from this fork; channel file `rc.yml` | invariants, `windows-update-metadata.test.mjs` |
 | Windows update trust | only this fork's Ed25519 keys, only `X.Y.Z-rc.N` | `windows-update-trust.test.mjs`, pinned fingerprints |
-| Links | diagnostics, feedback, desktop downloads point at the fork; 5 deliberate upstream links remain (Android APK, server release notes, plugin docs) | upstream-literal scan with an allowlist |
+| Links | diagnostics, feedback, desktop downloads point at the fork; server release notes point at the fork for a fork image (`vX.Y.Z-rc.N`) and upstream otherwise; 5 deliberate upstream links remain (Android APK, upstream server release notes, plugin docs) | upstream-literal scan with an allowlist |
 | ACP | Windows ACP fixes | ACP tests, invariants |
 | Encrypted notes | client-side encryption; the server refuses plaintext overwrites and advertises `features.encryptedNotes` | `encrypted-note*.test.mjs`, `tests/e2e/encrypted-note.spec.ts` |
 | Server image | `fork-docker-image.yml` publishes rc tags only, never `latest` | `fork-workflows.test.mjs` |

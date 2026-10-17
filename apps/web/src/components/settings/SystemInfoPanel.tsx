@@ -22,7 +22,7 @@ import {
 import { formatSystemInfoClipboard } from "@/lib/system-info-clipboard";
 import { cn } from "@/lib/utils";
 import { DesktopUpdateProgress } from "@/components/DesktopUpdateProgress";
-import { getReleaseTagForVersion, isClientAheadOfInstance } from "@/lib/version-check";
+import { getForkReleaseUrlForTag, getReleaseTagForVersion, isClientAheadOfInstance } from "@/lib/version-check";
 
 export type SystemInfoItem = {
   label: string;
@@ -407,11 +407,12 @@ export const SystemInfoPanel = ({ active = true }: { active?: boolean }) => {
     viewportRevision,
   ]);
   const releaseTag = release ? getReleaseTagForVersion(release.version) : null;
-  // The instance (server) runs upstream EdgeEver; its release notes stay upstream.
+  // A fork-built instance (vX.Y.Z-rc.N) links to the fork's release; an instance
+  // still running upstream EdgeEver keeps upstream release notes.
   // Desktop downloads below come from the fork (FORK_RELEASES_URL).
-  const releaseUrl = releaseTag
+  const releaseUrl = getForkReleaseUrlForTag(releaseTag) ?? (releaseTag
     ? `https://github.com/tianma-if/edgeever/releases/tag/${encodeURIComponent(releaseTag)}`
-    : "https://github.com/tianma-if/edgeever/releases/latest";
+    : "https://github.com/tianma-if/edgeever/releases/latest");
 
   const handleCopy = async () => {
     const clipboard = formatSystemInfoClipboard({
