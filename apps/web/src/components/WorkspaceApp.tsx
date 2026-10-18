@@ -9,17 +9,14 @@ import {
   useRef,
   useSyncExternalStore,
   type CSSProperties,
-  type ReactNode,
-  type MouseEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { useInfiniteQuery, useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { PluginPanelOpenOptions } from "@edgeever/plugin-api";
-import { RefreshCw, X } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import * as m from "motion/react-m";
-import { Button } from "@/components/ui/button";
 import { MemoListPane, MemoSelectionActionBar } from "./MemoListPane";
 import { MobileBottomNav, MobileNotebookPicker } from "./WorkspaceMobileChrome";
 import { QuickMemoSwitcher } from "./QuickMemoSwitcher";
@@ -51,7 +48,7 @@ import { isBrowserOffline, isBrowserOnline } from "@/lib/network-status";
 import { ENCRYPTED_NOTE_PLACEHOLDER_TEXT, encryptedNotePlaceholderDoc, hasEncryptedNoteMarker } from "@edgeever/shared";
 import { encryptWithEncryptedNoteVault, isEncryptedNoteVaultUnlocked } from "@/lib/encrypted-note-vault";
 import { EncryptedNoteCreateDialog } from "./EncryptedNoteCreateDialog";
-import { createDefaultDiagramDocument, createDefaultInfographicDocument, hasPosterDocumentMarker, posterFallbackMarkdown, serializePosterDocument, createDefaultTableDocument, diagramFallbackMarkdown, getNotebookScopeIds, hasTableDocumentMarker, infographicFallbackMarkdown, markdownToDoc, parseDiagramDocument, parseInfographicDocument, parseTableDocument, serializeDiagramDocument, serializeInfographicDocument, serializeTableDocument, tableFallbackMarkdown, type NoteCreateKind, type Notebook, type AuthUser, type MemoSummary, type MemoDetail, type MemoTemplate as SavedMemoTemplate } from "@edgeever/shared";
+import { createDefaultDiagramDocument, createDefaultInfographicDocument, hasPosterDocumentMarker, posterFallbackMarkdown, serializePosterDocument, createDefaultTableDocument, diagramFallbackMarkdown, getNotebookScopeIds, hasTableDocumentMarker, infographicFallbackMarkdown, markdownToDoc, parseDiagramDocument, parseInfographicDocument, parseTableDocument, serializeDiagramDocument, serializeInfographicDocument, serializeTableDocument, tableFallbackMarkdown, type NoteCreateKind, type Notebook, type AuthUser, type MemoSummary, type MemoDetail, type MemoTemplate as SavedMemoTemplate, getMemoDisplayTitle } from "@edgeever/shared";
 import { toggleMobileMemoSelection } from "@edgeever/shared/mobile-ui";
 import type {
   Pane,
@@ -61,7 +58,6 @@ import type {
   AppNoticeDialogState,
   MobileBottomNavItem,
   NotebookDropPosition,
-  NotebookMoveOption,
   MemoFilterMode,
   MemoSortMode,
   MemoDocumentAction,
@@ -126,6 +122,8 @@ import { useWorkspaceRoute } from "@/hooks/useWorkspaceRoute";
 import { useNoteProse } from "@/hooks/useNoteProse";
 import { useWorkspacePreferences } from "@/hooks/useWorkspacePreferences";
 import { useWorkspaceSelection } from "@/hooks/useWorkspaceSelection";
+import { useMemoLinkNavigation } from "@/hooks/useMemoLinkNavigation";
+import { useMemoSelectionReconciliation } from "@/hooks/useMemoSelectionReconciliation";
 import { useNotebookSelectionReconciliation } from "@/hooks/useNotebookSelectionReconciliation";
 import { useWorkspaceQueuedSync } from "@/hooks/useWorkspaceQueuedSync";
 import { useWorkspaceMemoRemoval } from "@/hooks/useWorkspaceMemoRemoval";
@@ -247,7 +245,7 @@ export const WorkspaceApp = ({
   const autoSelectedDemoNotebookRef = useRef(false);
   const [createdMemoEditId, setCreatedMemoEditId] = useState<string | null>(null);
   const pendingCreatedMemoIdRef = useRef<string | null>(null);
-  const pendingQuickSwitcherMemoIdRef = useRef<string | null>(desktopWorkspaceRestore?.selectedMemoId ?? null); // also companion/plugin opens not yet in the list
+  const pendingQuickSwitcherMemoIdRef = useRef<string | null>(desktopWorkspaceRestore?.selectedMemoId ?? null); // also link/companion/plugin opens not yet in the list
   useEffect(() => {
     if (!window.edgeeverDesktop?.isAvailable) return;
     writeDesktopWorkspaceRestoreState({
@@ -1069,10 +1067,7 @@ export const WorkspaceApp = ({
   });
 
   const showDescendantNotes = useShowDescendantNotesPreference();
-  useEffect(() => {
-    // A changed scope must not retain hidden notes in bulk actions.
-    clearMemoSelection();
-  }, [showDescendantNotes, clearMemoSelection]);
+  const previousShowDescendantNotesRef = useRef(showDescendantNotes);
   const selectedNotebookScopeIds = useMemo(
     () => (selectedNotebookId && !selectedTag ? getNotebookScopeIds(notebooks, selectedNotebookId, showDescendantNotes) : []),
     [notebooks, selectedNotebookId, selectedTag, showDescendantNotes]
@@ -1134,40 +1129,25 @@ export const WorkspaceApp = ({
     selectedMemoIndex >= 0 && selectedMemoIndex < memos.length - 1 ? memos[selectedMemoIndex + 1]?.id : null;
   const detailMemoId = rendererRecoveryMode ? null : selectedMemoId ?? memos[0]?.id ?? null;
 
+  const clearPendingMemoSelection = useMemoSelectionReconciliation({
+    memos,
+    selectedMemoId,
+    setSelectedMemoId,
+    rendererRecoveryMode,
+    creatingMemoSelectionRef,
+    pendingCreatedMemoIdRef,
+    pendingOpenedMemoIdRef: pendingQuickSwitcherMemoIdRef,
+    createdMemoEditId,
+  });
+
   useEffect(() => {
-    const selectedMemoInList = selectedMemoId ? memos.some((memo) => memo.id === selectedMemoId) : false;
-
-    if (rendererRecoveryMode) {
-      return;
+    // A changed scope must not retain hidden notes in single or bulk selection.
+    clearMemoSelection();
+    if (previousShowDescendantNotesRef.current !== showDescendantNotes) {
+      previousShowDescendantNotesRef.current = showDescendantNotes;
+      clearPendingMemoSelection();
     }
-
-    if (creatingMemoSelectionRef.current || pendingCreatedMemoIdRef.current) {
-      return;
-    }
-
-    if (pendingQuickSwitcherMemoIdRef.current) {
-      if (!memos.some((memo) => memo.id === pendingQuickSwitcherMemoIdRef.current)) {
-        return;
-      }
-      pendingQuickSwitcherMemoIdRef.current = null;
-    }
-
-    if (createdMemoEditId && selectedMemoId === createdMemoEditId) {
-      // Keep the create request alive until the editor consumes it. The new
-      // memo can appear in the list before its detail query has mounted the
-      // editor, and clearing it here would lose the autofocus request.
-      return;
-    }
-
-    if (memos.length === 0) {
-      setSelectedMemoId(null);
-      return;
-    }
-
-    if (!selectedMemoId || !selectedMemoInList) {
-      setSelectedMemoId(memos[0].id);
-    }
-  }, [createdMemoEditId, memos, rendererRecoveryMode, selectedMemoId]);
+  }, [showDescendantNotes, clearMemoSelection, clearPendingMemoSelection]);
 
   useEffect(() => {
     if (!rendererRecoveryMode || !selectedMemoId) return;
@@ -1221,6 +1201,7 @@ export const WorkspaceApp = ({
   const createNotebookMutation = useMutation({
     mutationFn: repository.createNotebook,
     onSuccess: async (data) => {
+      clearPendingMemoSelection();
       setSelectedTag(null);
       setSelectedNotebookId(data.notebook.id);
       setActivePane("memos");
@@ -2017,14 +1998,42 @@ export const WorkspaceApp = ({
       });
       return;
     }
-    const diagram = kind ? createDefaultDiagramDocument(kind) : null;
-    createMemoMutation.mutate({
+    if (!kind) {
+      createMemoMutation.mutate({ notebookId: targetNotebookId, title: "", contentMarkdown: "", tags: [] });
+      return;
+    }
+    const seed = createDefaultDiagramDocument(kind, {
+      mindMapRoot: t("diagram.seed.mindMapRoot"),
+      mindMapCapture: t("diagram.seed.mindMapCapture"),
+      mindMapOrganize: t("diagram.seed.mindMapOrganize"),
+      mindMapShare: t("diagram.seed.mindMapShare"),
+      mindMapQuickNotes: t("diagram.seed.mindMapQuickNotes"),
+      mindMapSync: t("diagram.seed.mindMapSync"),
+      mindMapNotebooks: t("diagram.seed.mindMapNotebooks"),
+      mindMapPublicLinks: t("diagram.seed.mindMapPublicLinks"),
+      flowchartStart: t("diagram.seed.flowchartStart"),
+      flowchartProcess: t("diagram.seed.flowchartProcess"),
+      flowchartEnd: t("diagram.seed.flowchartEnd"),
+      architectureSystem: t("diagram.seed.architectureSystem"),
+      architectureClient: t("diagram.seed.architectureClient"),
+      architectureApi: t("diagram.seed.architectureApi"),
+      architectureDatabase: t("diagram.seed.architectureDatabase"),
+      architectureStorage: t("diagram.seed.architectureStorage"),
+      architectureQuery: t("diagram.seed.architectureQuery"),
+      architectureFiles: t("diagram.seed.architectureFiles"),
+    });
+    const createDiagramMemo = (diagram: typeof seed) => createMemoMutation.mutate({
       notebookId: targetNotebookId,
-      title: diagram ? (kind === "mind-map" ? t("diagram.mindMap") : kind === "architecture" ? t("diagram.architecture") : t("diagram.flowchart")) : "",
-      contentJson: diagram ? markdownToDoc(diagramFallbackMarkdown(diagram)) : undefined,
-      contentMarkdown: diagram ? serializeDiagramDocument(diagram) : "",
+      title: kind === "mind-map" ? t("diagram.mindMap") : kind === "architecture" ? t("diagram.architecture") : t("diagram.flowchart"),
+      contentJson: markdownToDoc(diagramFallbackMarkdown(diagram)),
+      contentMarkdown: serializeDiagramDocument(diagram),
       tags: [],
     });
+    // The layout module ships with the lazily loaded diagram editor. If it
+    // cannot load, keep the starter geometry rather than failing the note.
+    void import("@/lib/diagram-layout")
+      .then(({ fitDefaultDiagramLabels }) => fitDefaultDiagramLabels(seed), () => seed)
+      .then(createDiagramMemo);
   };
 
   const handleImportMarkdownFiles = async (files: File[]) => {
@@ -2187,7 +2196,7 @@ export const WorkspaceApp = ({
     if (duplicateMemoMutation.isPending || memoView === "trash") return;
     duplicateMemoMutation.mutate({
       memoId: memo.id,
-      title: t("editor.duplicateTitle", { title: memo.title?.trim() || t("common.untitledMemo") }).slice(0, 160),
+      title: t("editor.duplicateTitle", { title: getMemoDisplayTitle(memo.title, t("common.untitledMemo")) }).slice(0, 160),
     });
   };
 
@@ -2407,10 +2416,12 @@ export const WorkspaceApp = ({
   };
 
   const handleSelectNotebook = (notebookId: string) => {
+    clearPendingMemoSelection();
     navigateWorkspaceHome();
     setMemoView("notebook");
     setSelectedTag(null);
     setSelectedNotebookId(notebookId);
+    setRightView("editor");
     setMobileBottomNavActive("home");
     clearMemoSelection();
     clearPendingCreatedMemo();
@@ -2420,6 +2431,7 @@ export const WorkspaceApp = ({
   };
 
   const handleSelectAllMemos = () => {
+    clearPendingMemoSelection();
     navigateWorkspaceHome();
     setMemoView("notebook");
     setSelectedTag(null);
@@ -2434,6 +2446,7 @@ export const WorkspaceApp = ({
   };
 
   const handleMobileHome = () => {
+    clearPendingMemoSelection();
     navigateWorkspaceHome();
     if (memoView === "trash") {
       setMemoView("notebook");
@@ -2449,6 +2462,7 @@ export const WorkspaceApp = ({
   };
 
   const handleSelectTag = (tag: string) => {
+    clearPendingMemoSelection();
     navigateWorkspaceHome();
     setMemoView("notebook");
     setSelectedTag(tag);
@@ -2469,6 +2483,7 @@ export const WorkspaceApp = ({
   }, []);
 
   const handleGlobalSearch = useCallback(() => {
+    clearPendingMemoSelection();
     navigateWorkspaceHome();
     setMemoView("notebook");
     setSelectedTag(null);
@@ -2477,7 +2492,7 @@ export const WorkspaceApp = ({
     setRightView("editor");
     clearMemoSelection();
     handleMobileSearch();
-  }, [clearMemoSelection, handleMobileSearch, navigateWorkspaceHome, setSelectedNotebookId]);
+  }, [clearMemoSelection, clearPendingMemoSelection, handleMobileSearch, navigateWorkspaceHome, setSelectedNotebookId]);
 
   const handleOpenQuickSwitcherMemo = useCallback((memo: MemoSummary) => {
     pendingQuickSwitcherMemoIdRef.current = memo.id;
@@ -2521,6 +2536,22 @@ export const WorkspaceApp = ({
     }
   }, [clearMemoSelection, clearPendingCreatedMemo, navigateWorkspaceHome, setSelectedMemoId, setSelectedNotebookId]);
 
+  const handleOpenLinkedMemo = useMemoLinkNavigation({
+    repository,
+    navigationScope: JSON.stringify([
+      route.pathname, route.search, memoView, selectedNotebookId, selectedMemoId,
+      selectedTag, search, memoFilterMode, activePane, rightView,
+    ]),
+    onOpen: (memo) => {
+      cacheMemoDetail(queryClient, memo, "notebook");
+      handleOpenPluginNote(memo.id, memo.notebookId);
+    },
+    onError: () => setAppNoticeDialog({
+      title: t("memoList.openMemo"),
+      description: t("workspaceDialogs.openMemoFailed"),
+    }),
+  });
+
   useEffect(() => pluginHost.setNavigationAdapter({ openNote: handleOpenPluginNote }), [handleOpenPluginNote, pluginHost]);
 
   useEffect(() => {
@@ -2530,10 +2561,26 @@ export const WorkspaceApp = ({
   }, [pluginNavigationRequest, selectedMemoId]);
 
   const handleCancelMobileSearch = () => {
+    clearPendingMemoSelection();
     setSearch("");
     setMobileBottomNavActive("home");
     clearMemoSelection();
     setActivePane("memos");
+  };
+
+  const handleSearchChange = (query: string) => {
+    if (query !== search) clearPendingMemoSelection();
+    setSearch(query);
+  };
+
+  const handleFilterModeChange = (mode: MemoFilterMode) => {
+    if (mode !== memoFilterMode) clearPendingMemoSelection();
+    setMemoFilterMode(mode);
+  };
+
+  const handleSortModeChange = (mode: MemoSortMode) => {
+    if (mode !== memoSortMode) clearPendingMemoSelection();
+    setMemoSortMode(mode);
   };
 
   const clearHiddenMobileSearch = () => {
@@ -2671,10 +2718,7 @@ export const WorkspaceApp = ({
       if (command.startsWith("open-memo:")) {
         const memoId = command.slice("open-memo:".length);
         if (memoId) {
-          navigateWorkspaceHome();
-          setMemoView("notebook");
-          setSelectedMemoId(memoId);
-          setActivePane("editor");
+          void handleOpenLinkedMemo(memoId);
         }
       }
     });
@@ -2699,7 +2743,7 @@ export const WorkspaceApp = ({
       removeMarkdownListener();
       removeScreenshotListener();
     };
-  }, [createMemoMutation, defaultMemoNotebookId, handleCreateMemo, handleCreateNotebook, handleGlobalSearch, notebooks, selectedNotebookId, toggleDesktopFocusMode]);
+  }, [createMemoMutation, defaultMemoNotebookId, handleCreateMemo, handleCreateNotebook, handleGlobalSearch, handleOpenLinkedMemo, notebooks, selectedNotebookId, toggleDesktopFocusMode]);
 
   const handleWorkspaceBackRequest = useCallback(() => {
     if (appNoticeDialog) {
@@ -3264,15 +3308,7 @@ export const WorkspaceApp = ({
                   view={memoView}
                   canCreateMemo={canCreateMemo}
                   isCreatingMemo={createMemoMutation.isPending}
-                  onSelect={(notebookId) => {
-                    navigateWorkspaceHome();
-                    setMemoView("notebook");
-                    setSelectedTag(null);
-                    setSelectedNotebookId(notebookId);
-                    clearMemoSelection();
-                    setRightView("editor");
-                    setActivePane("memos");
-                  }}
+                  onSelect={handleSelectNotebook}
                   onCreateMemo={handleCreateMemo}
                   onCreateNotebook={handleCreateNotebook}
                   onRenameNotebook={handleRenameNotebook}
@@ -3296,6 +3332,7 @@ export const WorkspaceApp = ({
                   onOpenPluginManager={handleOpenPluginManager}
                   onOpenSettings={handleOpenSettings}
                   onOpenTrash={() => {
+                    clearPendingMemoSelection();
                     navigateWorkspaceTrash();
                     setMemoView("trash");
                     setSelectedTag(null);
@@ -3359,8 +3396,8 @@ export const WorkspaceApp = ({
               sortMode={memoSortMode}
               mobileSearchActive={mobileSearchActive}
               searchFocusToken={mobileSearchFocusToken}
-              onFilterModeChange={setMemoFilterMode}
-              onSortModeChange={setMemoSortMode}
+              onFilterModeChange={handleFilterModeChange}
+              onSortModeChange={handleSortModeChange}
               onLoadMoreMemos={handleLoadMoreMemos}
               canCreateMemo={canCreateMemo}
               isLoading={memosQuery.isLoading}
@@ -3375,7 +3412,7 @@ export const WorkspaceApp = ({
               multiSelectKeyDown={multiSelectKeyDown}
               onRetry={() => void memosQuery.refetch()}
               onOpenNotebookPicker={() => setMobileNotebookPickerOpen(true)}
-              onSearch={setSearch}
+              onSearch={handleSearchChange}
               onCancelMobileSearch={handleCancelMobileSearch}
               onCreateMemo={handleCreateMemo}
               onImportMarkdownFiles={(files) => void handleImportMarkdownFiles(files)}
@@ -3389,6 +3426,7 @@ export const WorkspaceApp = ({
               isSyncingMemos={isManualMemoSyncing || isSyncingQueuedChanges || isPullRefreshing || memosQuery.isRefetching}
               canSyncMemos={isOnline}
               onOpenTrash={() => {
+                clearPendingMemoSelection();
                 navigateWorkspaceTrash();
                 setMemoView("trash");
                 setSelectedTag(null);
@@ -3403,6 +3441,7 @@ export const WorkspaceApp = ({
               onBackFromTrash={handleSelectAllMemos}
               onClearTag={handleSelectAllMemos}
               onOpenMemo={(memoId) => {
+                clearPendingMemoSelection();
                 if (shouldNavigateHomeWhenOpeningMemo(memoView)) {
                   navigateWorkspaceHome();
                 }
@@ -3433,6 +3472,7 @@ export const WorkspaceApp = ({
               onRestoreMemo={handleRestoreMemoFromList}
               onMoveMemo={handleMoveMemoFromList}
               onRequestDocumentAction={(memoId: string, action: MemoDocumentAction, printWindow?: Window | null) => {
+                clearPendingMemoSelection();
                 if (shouldNavigateHomeWhenOpeningMemo(memoView)) {
                   navigateWorkspaceHome();
                 }
@@ -3789,12 +3829,7 @@ export const WorkspaceApp = ({
                     onDocumentActionConsumed={(requestId) => {
                       setMemoDocumentActionRequest((current) => current?.id === requestId ? null : current);
                     }}
-                    onOpenMemo={(memoId) => {
-                      clearPendingCreatedMemo();
-                      setMemoView("notebook");
-                      setSelectedMemoId(memoId);
-                      setActivePane("editor");
-                    }}
+                    onOpenMemo={handleOpenLinkedMemo}
                     imageCompressionEnabled={imageCompressionEnabled}
                     selectionActionBar={memoSelectionActionBar}
                     onBackToList={() => {

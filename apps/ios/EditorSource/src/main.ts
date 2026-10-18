@@ -1,3 +1,5 @@
+import { prepareNoteImageAssets } from "@edgeever/shared/note-image-fonts";
+import { noteImageAssetUrls } from "@edgeever/shared/note-image-assets";
 import "./styles.css";
 import "katex/dist/katex.min.css";
 import { Graph } from "@antv/x6";
@@ -1297,6 +1299,8 @@ async function exportNoteImage(request: ImageExportRequest) {
   document.body.appendChild(host);
 
   try {
+    const assets = await prepareNoteImageAssets({ theme: resolvedTheme, fontStyle, text: [request.title, request.notebook, ...(request.tags || []), request.updatedAt, bodyHtml].join(" "), urls: noteImageAssetUrls });
+    style.textContent = assets.css + generateCardCss({ theme: resolvedTheme, fontStyle, fontSize, cardWidth });
     const images = Array.from(documentRoot.querySelectorAll<HTMLImageElement>("img"));
     await Promise.race([
       Promise.all([
@@ -1341,7 +1345,7 @@ async function exportNoteImage(request: ImageExportRequest) {
         }
       },
       pixelRatio: renderPlan.pixelRatio,
-      skipFonts: true,
+      fontEmbedCSS: assets.fontCss,
       width,
     });
     let canvas: HTMLCanvasElement;
@@ -1433,7 +1437,9 @@ const api: EdgeEverEditorAPI = {
     const modeChanged = nextMode !== mode;
     mode = nextMode;
     locale = opts.locale === "en-US" || opts.locale === "ja" || opts.locale === "pl" ? opts.locale : "zh-CN";
-    editor.setEditable(mode === "editor");
+    // Configuring a reused WebView is not a document edit. TipTap otherwise emits
+    // an update for its old (often empty) body before native pushes the share seed.
+    editor.setEditable(mode === "editor", false);
     setToolbarVisible(mode === "editor");
     document.documentElement.dataset.theme = opts.theme || "light";
     document.body.classList.toggle("viewer-mode", mode === "viewer");
