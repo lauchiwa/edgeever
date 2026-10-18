@@ -1,17 +1,21 @@
-name: Fork release (Windows)
+name: Fork release
 
-# Builds, signs and publishes this fork's Windows release. Pushing a tag
-# vX.Y.Z-rc.N runs it end to end (see docs/fork-releases.md).
+# Builds, signs and publishes this fork's Windows x64 and Linux x64 release.
+# Pushing a tag vX.Y.Z-rc.N runs it end to end (see docs/fork-releases.md).
 #
-# - windows: builds and verifies the app and uploads an unsigned Draft
-#   pre-release. It has no access to the signing key, so the build tools and
-#   npm dependencies it runs never see it.
+# - windows, linux: build and verify each platform in parallel and keep the
+#   assets as workflow artifacts. They have no access to the signing key and
+#   only a read token, so the build tools and npm dependencies they run never
+#   see the key and cannot change a release. linux also runs a real update
+#   from an older AppImage to the new one.
+# - draft: once both pass, uploads all assets as an unsigned Draft
+#   pre-release. It installs and runs nothing from the repository.
 # - publish: the only job in the fork-release Environment, which holds the
 #   primary key. It installs nothing and runs only the repository's
 #   dependency-free scripts from the workflow commit: it signs
-#   latest-windows.json, re-downloads and audits all assets exactly as a
-#   client would, then publishes. Any failure leaves a Draft, which the
-#   updater never sees. The cold backup key never enters GitHub.
+#   latest-windows.json, re-downloads and audits every asset exactly as a
+#   client would, then publishes. Any failure leaves a Draft (or no release),
+#   which the updater never sees. The cold backup key never enters GitHub.
 on:
   push:
     tags:
@@ -23,7 +27,7 @@ on:
         required: true
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: fork-release-${{ github.event.inputs.tag || github.ref_name }}
@@ -124,6 +128,177 @@ jobs:
           node scripts/create-windows-update-metadata.mjs "${stage}" "${version}"
           ls -la "${stage}"
 
+      - uses: actions/upload-artifact@v7
+        with:
+          name: fork-release-windows
+          path: ${{ runner.temp }}/fork-release/*
+          if-no-files-found: error
+          retention-days: 7
+
+  linux:
+    if: github.repository == 'lauchiwa/edgeever'
+    name: Build Linux x64 AppImage
+    # The Rust sidecar is dynamically linked; the oldest supported runner keeps
+    # its glibc requirement at or below 2.35, as upstream's Linux Preview does.
+    runs-on: ubuntu-22.04
+    timeout-minutes: 75
+    defaults:
+      run:
+        shell: bash
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: Check the tag
+        run: |
+          set -euo pipefail
+          node scripts/fork-release-version.mjs check "${TAG}"
+          git fetch origin main
+          git merge-base --is-ancestor "${TAG}^{commit}" origin/main || {
+            echo "::error::${TAG} is not on main. Release only reviewed, merged commits."; exit 1; }
+          if gh release view "${TAG}" -R "${GITHUB_REPOSITORY}" --json isDraft --jq .isDraft 2>/dev/null | grep -qx false; then
+            echo "::error::${TAG} is already published; a published release is never rebuilt."; exit 1
+          fi
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install AppImage runtime dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes libfuse2
+
+      - name: Install dependencies
+        run: |
+          for attempt in 1 2 3; do
+            bun install --frozen-lockfile && exit 0
+            [ "$attempt" = "3" ] && exit 1
+            sleep "$((15 * attempt))"
+          done
+
+      # Gates check the reviewed source exactly as tagged, before anything is rewritten.
+      - name: Release gates
+        env:
+          EDGE_EVER_FORK_RELEASE: "1"
+        run: |
+          set -euo pipefail
+          bun test scripts/fork-invariants.test.mjs scripts/fork-linux-release.test.mjs \
+            scripts/linux-update-release.test.mjs
+
+      # main keeps the bare upstream version; the release version comes from the tag.
+      - name: Apply the release version
+        run: node scripts/fork-release-version.mjs apply "${TAG}"
+
+      - name: Build Web renderer
+        env:
+          EDGE_EVER_DESKTOP_BUILD: "1"
+        run: bun run build:web
+
+      - name: Build x64 Rust sidecar
+        run: cargo build --manifest-path crates/desktop-sidecar/Cargo.toml --release
+
+      # The update gate starts from the previous published fork AppImage, as
+      # installed clients do. Before any exists, it builds this source at an
+      # older rc version, so the first Linux release still replaces a real one.
+      - name: Get the update predecessor
+        run: |
+          set -euo pipefail
+          source="${RUNNER_TEMP}/EdgeEver-linux-update-source.AppImage"
+          gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/releases?per_page=100" > "${RUNNER_TEMP}/releases.json"
+          previous="$(node -e '
+            const releases = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).flat();
+            const found = releases.find((release) => !release.draft && release.tag_name !== process.argv[2]
+              && release.assets.some((asset) => /^EdgeEver-.+-linux-x64\.AppImage$/.test(asset.name)));
+            process.stdout.write(found ? found.tag_name : "");
+          ' "${RUNNER_TEMP}/releases.json" "${TAG}")"
+          if [[ -n "${previous}" ]]; then
+            directory="${RUNNER_TEMP}/previous-linux"
+            gh release download "${previous}" -R "${GITHUB_REPOSITORY}" --dir "${directory}" \
+              -p "EdgeEver-${previous#v}-linux-x64.AppImage" -p SHA256SUMS-linux.txt
+            (cd "${directory}" && sha256sum --check SHA256SUMS-linux.txt)
+            mv "${directory}/EdgeEver-${previous#v}-linux-x64.AppImage" "${source}"
+          else
+            previous="v0.0.1-rc.0 (built from this source)"
+            backup="${RUNNER_TEMP}/edgeever-desktop-package.json"
+            cp apps/desktop/package.json "${backup}"
+            trap 'cp "${backup}" apps/desktop/package.json' EXIT
+            node -e '
+              const fs = require("fs");
+              const path = "apps/desktop/package.json";
+              const text = fs.readFileSync(path, "utf8");
+              const { version } = JSON.parse(text);
+              fs.writeFileSync(path, text.replace(`"version": "${version}"`, "\"version\": \"0.0.1-rc.0\""));
+            '
+            grep -q '"version": "0.0.1-rc.0"' apps/desktop/package.json
+            EDGE_EVER_DESKTOP_ARCH=x64 EDGE_EVER_DESKTOP_TARGET=linux bun scripts/run-desktop-builder.mjs --publish never
+            mv release/desktop/EdgeEver-0.0.1-rc.0-linux-x64.AppImage "${source}"
+          fi
+          chmod +x "${source}"
+          echo "Update predecessor: ${previous}" >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Package Linux AppImage
+        env:
+          EDGE_EVER_DESKTOP_ARCH: x64
+          EDGE_EVER_DESKTOP_TARGET: linux
+        run: bun scripts/run-desktop-builder.mjs --publish never
+
+      - name: Verify package and first launch
+        env:
+          EDGE_EVER_DESKTOP_ARCH: x64
+          EDGE_EVER_VERIFY_TARGET: linux
+          EDGE_EVER_SIDECAR_PATH: ${{ github.workspace }}/release/desktop/linux-unpacked/resources/sidecar/edgeever-sidecar
+          EDGE_EVER_MIGRATIONS_PATH: ${{ github.workspace }}/release/desktop/linux-unpacked/resources/migrations
+        run: |
+          set -euo pipefail
+          bun scripts/verify-desktop-package.mjs
+          bun scripts/test-desktop-sidecar.mjs
+          xvfb-run -a bun run verify:packaged-desktop-startup -- release/desktop/linux-unpacked/EdgeEver
+          xvfb-run -a bun run verify:desktop-protocol-e2e -- release/desktop/linux-unpacked/EdgeEver
+
+      - name: Stage Linux assets
+        run: |
+          set -euo pipefail
+          node scripts/fork-linux-release.mjs stage release/desktop "${RUNNER_TEMP}/fork-release" "${TAG#v}"
+          (cd "${RUNNER_TEMP}/fork-release" && sha256sum --check SHA256SUMS-linux.txt)
+          ls -la "${RUNNER_TEMP}/fork-release"
+
+      - name: Verify real AppImage automatic update
+        run: |
+          xvfb-run -a bun scripts/fork-verify-linux-appimage-update.mjs \
+            "${RUNNER_TEMP}/EdgeEver-linux-update-source.AppImage" "${RUNNER_TEMP}/fork-release" "${TAG#v}"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: fork-release-linux
+          path: ${{ runner.temp }}/fork-release/*
+          if-no-files-found: error
+          retention-days: 7
+
+  draft:
+    if: github.repository == 'lauchiwa/edgeever'
+    name: Upload Draft pre-release
+    needs: [windows, linux]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: fork-release-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/fork-release
+
       - name: Upload Draft pre-release
         shell: bash
         run: |
@@ -131,13 +306,18 @@ jobs:
           version="${TAG#v}"
           stage="${RUNNER_TEMP}/fork-release"
           base="${version%-rc.*}"
+          ls -la "${stage}"
           notes="$(printf '%s\n' \
-            "## 主要更新" "" "- 基于上游 EdgeEver v${base} 的二开版本（Windows x64）。" "" \
-            "## Key Changes" "" "- Fork build of this repository, synced from upstream EdgeEver v${base} (Windows x64).")"
+            "## 主要更新" "" "- 基于上游 EdgeEver v${base} 的二开版本（Windows x64、Linux x64 AppImage）。" "" \
+            "## Key Changes" "" "- Fork build of this repository, synced from upstream EdgeEver v${base} (Windows x64, Linux x64 AppImage).")"
           if gh release view "${TAG}" -R "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            if [[ "$(gh release view "${TAG}" -R "${GITHUB_REPOSITORY}" --json isDraft --jq .isDraft)" != "true" ]]; then
+              echo "::error::${TAG} is already published; a published release is never rebuilt."; exit 1
+            fi
             for asset in $(gh release view "${TAG}" -R "${GITHUB_REPOSITORY}" --json assets --jq '.assets[].name'); do
               gh release delete-asset "${TAG}" "${asset}" -R "${GITHUB_REPOSITORY}" --yes
             done
+            gh release edit "${TAG}" -R "${GITHUB_REPOSITORY}" --notes "${notes}"
           else
             gh release create "${TAG}" -R "${GITHUB_REPOSITORY}" --draft --prerelease \
               --verify-tag --title "EdgeEver ${version}" --notes "${notes}"
@@ -147,10 +327,12 @@ jobs:
   publish:
     if: github.repository == 'lauchiwa/edgeever'
     name: Sign, audit and publish
-    needs: windows
+    needs: draft
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     environment: fork-release
+    permissions:
+      contents: write
     env:
       TAG: ${{ github.event.inputs.tag || github.ref_name }}
       GH_TOKEN: ${{ github.token }}
@@ -183,5 +365,5 @@ jobs:
           {
             echo "### Published ${TAG}"
             echo
-            echo "Signed, audited from a fresh download and published as a pre-release."
+            echo "Windows signed; Windows and Linux assets audited from a fresh download; published as a pre-release."
           } >> "${GITHUB_STEP_SUMMARY}"

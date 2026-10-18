@@ -1,5 +1,5 @@
 // Guards the fork's workflows: they run only in the fork, only the release's
-// publish job can reach the signing key (and only the Android sign job the
+// publish job can reach the signing key (the build jobs only a read token) (and only the Android sign job the
 // keystore), and upstream's snapshot sync stays out of the fork's own files.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -40,16 +40,27 @@ describe("fork workflows", () => {
 
   test("only the publish job can reach the signing key, and it runs nothing it installs", () => {
     const text = workflow("fork-release.yml");
-    const { windows, publish, ...others } = jobsOf(text);
+    const { windows, linux, draft, publish, ...others } = jobsOf(text);
     expect(Object.keys(others)).toEqual([]);
-    // Nothing outside the jobs (workflow env, defaults) may carry a secret.
+    // Nothing outside the jobs (workflow env, defaults) may carry a secret,
+    // and the default token cannot write.
     expect(text.slice(0, text.search(/^jobs:\s*$/m))).not.toMatch(/secrets\./);
+    expect(text).toMatch(/^permissions:\s*\n  contents: read\s*\n/m);
 
-    expect(windows).not.toMatch(/secrets\.|environment:|SIGNING/);
-    expect(windows).not.toContain("fork-sign-release");
+    // The build jobs run npm dependencies: no key, no Environment, no write
+    // token, no release changes. They only hand artifacts to draft.
+    for (const build of [windows, linux]) {
+      expect(build).not.toMatch(/secrets\.|environment:|SIGNING|permissions:|gh release (?:create|upload|edit|delete)/);
+      expect(build).not.toContain("fork-sign-release");
+      expect(build).toContain("actions/upload-artifact@");
+    }
+
+    expect(draft).toMatch(/^    needs: \[windows, linux\]\s*$/m);
+    expect(draft).toMatch(/^    permissions:\s*\n      contents: write\s*$/m);
+    expect(draft).not.toMatch(/secrets\.|environment:|actions\/checkout|bun |npm |node /);
 
     expect(publish).toMatch(/^    environment: fork-release\s*$/m);
-    expect(publish).toMatch(/^    needs: windows\s*$/m);
+    expect(publish).toMatch(/^    needs: draft\s*$/m);
     expect([...publish.matchAll(/secrets\.(\w+)/g)].map((match) => match[1]).sort())
       .toEqual(["FORK_WINDOWS_UPDATE_SIGNING_KEY", "FORK_WINDOWS_UPDATE_SIGNING_PASSPHRASE"]);
     expect(publish).not.toMatch(/bun |npm |npx |pnpm |yarn |setup-bun|cache:/);
@@ -58,6 +69,23 @@ describe("fork workflows", () => {
     expect(publish).toContain("umask 077");
     expect(publish).toMatch(/trap 'rm -f "\$\{key\}"' EXIT/);
     expect(publish).toContain('node scripts/fork-sign-release.mjs "${TAG}" --publish');
+  });
+
+  // Linux is published only after a real replacement of an older AppImage by
+  // the staged one, served from the exact bytes the Draft receives.
+  test("the Linux job verifies the package and a real AppImage update before staging", () => {
+    const { linux } = jobsOf(workflow("fork-release.yml"));
+    expect(linux).toMatch(/^    runs-on: ubuntu-22\.04\s*$/m);
+    expect(linux).toContain("EDGE_EVER_DESKTOP_TARGET: linux");
+    expect(linux).toContain("EDGE_EVER_VERIFY_TARGET: linux");
+    expect(linux).toContain("verify:packaged-desktop-startup");
+    const step = (name) => linux.search(new RegExp(`^\\s*- name: ${name}\\s*$`, "m"));
+    const order = ["Get the update predecessor", "Package Linux AppImage", "Stage Linux assets", "Verify real AppImage automatic update"].map(step);
+    expect(Math.min(...order)).toBeGreaterThan(-1);
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+    expect(linux).toContain("node scripts/fork-linux-release.mjs stage");
+    expect(linux).toContain("bun scripts/fork-verify-linux-appimage-update.mjs");
+    expect(linux.indexOf("upload-artifact")).toBeGreaterThan(step("Verify real AppImage automatic update"));
   });
 
   // The publish job installs nothing, so the signing script must only import
@@ -91,12 +119,16 @@ describe("fork workflows", () => {
   // The gates assert that main carries the bare upstream version, so they must
   // run on the tagged source before the rc version is written into it.
   test("the release gates run before the release version is applied, and both before the build", () => {
-    const text = workflow("fork-release.yml");
-    const step = (name) => text.search(new RegExp(`^\\s*- name: ${name}\\s*$`, "m"));
-    const [gates, apply, build] = ["Release gates", "Apply the release version", "Build Web renderer"].map(step);
-    expect(Math.min(gates, apply, build)).toBeGreaterThan(-1);
-    expect(gates).toBeLessThan(apply);
-    expect(apply).toBeLessThan(build);
+    const { windows, linux } = jobsOf(workflow("fork-release.yml"));
+    for (const job of [windows, linux]) {
+      const step = (name) => job.search(new RegExp(`^\\s*- name: ${name}\\s*$`, "m"));
+      const [gates, apply, build] = ["Release gates", "Apply the release version", "Build Web renderer"].map(step);
+      expect(Math.min(gates, apply, build)).toBeGreaterThan(-1);
+      expect(gates).toBeLessThan(apply);
+      expect(apply).toBeLessThan(build);
+      expect(job).toContain("fork-release-version.mjs check");
+      expect(job).toContain("merge-base --is-ancestor");
+    }
   });
 
   // The server image ships the same reviewed rc tag as the desktop release and

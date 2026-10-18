@@ -1,8 +1,8 @@
 # 二开版发布（lauchiwa/edgeever）
 
-本仓库是上游 EdgeEver（`tianma-if/edgeever`）的二次开发 fork。它在自己的 Releases 页面构建并发布 Windows 桌面版，已安装的二开客户端只从这里更新。不会向上游写入任何内容。English: [fork-releases.md](fork-releases.md).
+本仓库是上游 EdgeEver（`tianma-if/edgeever`）的二次开发 fork。它在自己的 Releases 页面构建并发布 Windows 与 Linux 桌面版，已安装的二开客户端只从这里更新。不会向上游写入任何内容。English: [fork-releases.md](fork-releases.md).
 
-当前范围：**Windows x64 桌面端，以及服务端镜像** `ghcr.io/lauchiwa/edgeever`（API 与浏览器 Web 端）。不发布 macOS、Linux、Android 和 iOS 的二开版本（Windows 验证稳定后再支持 Linux）。Android 只有作为工作流产物的**测试版**，见 [Android 测试版](#android-测试版)。[加密笔记](encrypted-notes.zh-CN.md)等二开功能需要二开客户端与运行二开镜像的服务端同时具备。
+当前范围：**Windows x64 桌面端、Linux x64 AppImage，以及服务端镜像** `ghcr.io/lauchiwa/edgeever`（API 与浏览器 Web 端）。不发布 macOS、Android 和 iOS 的二开版本。Android 只有作为工作流产物的**测试版**，见 [Android 测试版](#android-测试版)。[加密笔记](encrypted-notes.zh-CN.md)等二开功能需要二开客户端与运行二开镜像的服务端同时具备。
 
 ## 版本号
 
@@ -26,8 +26,9 @@ vX.Y.Z-rc.N
 | 方面 | 二开行为 | 保护 |
 | --- | --- | --- |
 | 仓库身份 | `apps/desktop/src/main/fork-config.mjs`（渲染端对应 `packages/shared/src/fork-config.ts`） | `scripts/fork-invariants.test.mjs` |
-| 自动更新 | electron-builder 发布到本 fork 并从本 fork 更新；渠道文件为 `rc.yml` | 不变量测试、`windows-update-metadata.test.mjs` |
+| 自动更新 | electron-builder 发布到本 fork 并从本 fork 更新；渠道文件为 `rc.yml`（Windows）和 `rc-linux.yml`（Linux） | 不变量测试、`windows-update-metadata.test.mjs`、`fork-linux-release.test.mjs` |
 | Windows 更新签名 | 只信任本 fork 的 Ed25519 密钥，只接受 `X.Y.Z-rc.N` | `windows-update-trust.test.mjs`、固定的公钥指纹 |
+| Linux 更新校验 | 与上游 Linux 预览版相同：来自本 fork Releases 的 HTTPS 下载、`rc-linux.yml` 中的 sha512（electron-updater 校验）和独立的 `SHA256SUMS-linux.txt`；**没有签名清单** | `fork-linux-release.test.mjs`、发布前的真实 AppImage 跨版本更新 |
 | 链接 | 诊断、反馈、桌面端下载指向 fork；服务端 Release 说明在二开镜像（`vX.Y.Z-rc.N`）下指向 fork，否则指向上游；保留若干有意指向上游的链接（Android APK 下载、上游服务端 Release 说明、插件文档、移动端的上游更新检查与主页链接、固定到上游 commit 的海报字体） | 上游地址扫描及白名单 |
 | Android 测试版 | 沿用包名 `org.edgeever.mobile`，使用二开 keystore；关闭 expo-updates 和应用内 APK 更新，上游 OTA 更新不会替换二开代码；原生解锁加密笔记 | 不变量测试、`fork-workflows.test.mjs`、`fork-android.yml` 中的 manifest 检查 |
 | ACP | Windows ACP 修复 | ACP 测试、不变量测试 |
@@ -84,8 +85,11 @@ vX.Y.Z-rc.N
    ```
 
 2. 其余步骤由 `fork-release.yml` 自动完成，无需手动操作：
-   - `windows` 任务检查 tag 是否位于 `main` 上，运行发布检查（包括两把公钥都已固定），写入版本号，构建并试启动 Windows 应用，然后上传一个 **Draft** 预发布版本，包含安装包、`rc.yml`、`latest-windows.json` 和 `SHA256SUMS-windows.txt`。
-   - `publish` 任务签名 `latest-windows.json`，上传签名，重新下载全部 5 个资产，按客户端的方式完整校验，校验通过后才发布。
+   - `windows` 与 `linux` 任务并行运行，都只持有只读令牌、读不到签名密钥。两者都会检查 tag 是否位于 `main` 上、运行发布检查（包括两把公钥都已固定）、写入版本号并构建和试启动应用：
+     - `windows` 产出安装包、`rc.yml`、`latest-windows.json` 和 `SHA256SUMS-windows.txt`。
+     - `linux` 在 Ubuntu 22.04（glibc 2.35 基线）上产出 AppImage、`rc-linux.yml` 和 `SHA256SUMS-linux.txt`，并做一次真实的跨版本自动更新：旧 AppImage 从只提供本次资产的本地更新源下载新 AppImage，替换自身后以新版本重启。旧版本取上一个带 Linux 资产的已发布二开版本；还没有时，用同一份源码按 `0.0.1-rc.0` 构建。
+   - `draft` 任务只在两个平台都通过后运行，把全部 7 个资产上传为 **Draft** 预发布版本。任一平台失败都不会创建或改动 Draft。
+   - `publish` 任务签名 `latest-windows.json`，上传签名，重新下载全部 8 个资产，按客户端的方式完整校验 Windows 与 Linux 资产，校验通过后才发布。
 
    客户端看不到 Draft，所以失败后可以安全重试：修复原因后，用同一个 tag 手动运行工作流（Actions → Fork release → 在 `main` 上 Run workflow）。
 3. 本机兜底方式，例如 Environment Secret 不可用时（使用 PowerShell 或 Windows Terminal，不要用 Git Bash；口令会提示输入）：
@@ -95,7 +99,7 @@ vX.Y.Z-rc.N
    node scripts/fork-sign-release.mjs v1.119.0-rc.0 --publish
    ```
 
-同一个 tag 还会触发 `fork-docker-image.yml` 构建服务端镜像（见下文）。两个工作流互相独立：镜像构建失败不会阻塞 Windows 发布，可以用同一个 tag 手动运行该工作流重建。
+同一个 tag 还会触发 `fork-docker-image.yml` 构建服务端镜像（见下文）。两个工作流互相独立：镜像构建失败不会阻塞桌面端发布，可以用同一个 tag 手动运行该工作流重建。
 
 基线版本打错的 tag 不需要删除，发布一个正确且更高的 tag 即可。**不要删除或重新签名已发布的版本。**
 
@@ -158,6 +162,14 @@ curl -fsS http://127.0.0.1:8787/api/v1/auth/session   # 应包含 features.encry
 4. 把 `.p12` 文件及其口令备份到离线位置。丢失后，新构建无法覆盖安装当前版本，只能卸载应用，本地缓存随之丢失（服务端数据不受影响）。
 
 安装：包名与上游相同但签名不同，Android 会拒绝覆盖安装上游应用。先卸载上游应用（其本地缓存和尚未发送的离线修改会丢失），再安装二开 APK 并重新登录。之后的二开构建可以互相覆盖安装。
+
+## Linux AppImage
+
+- 适用于 x64、glibc 2.35 及以上的发行版（如 Ubuntu 22.04+）。运行 AppImage 需要 FUSE 2：Ubuntu 22.04 安装 `libfuse2`，Ubuntu 24.04 安装 `libfuse2t64`。
+- 从 Releases 下载 `EdgeEver-X.Y.Z-rc.N-linux-x64.AppImage`，可以先用 `sha256sum --check SHA256SUMS-linux.txt` 核对，然后 `chmod +x` 并直接运行。**只有直接运行 AppImage 文件时才会自动更新**，解包或经第三方工具集成后不会。
+- 应用会在后台下载新版本，并用新版本替换这个 AppImage 文件；该文件及其所在目录必须对当前用户可写。
+- 上游 Linux 预览版（不带后缀的版本号）不会自动更新到二开版本，需要手动下载二开 AppImage。
+- **Linux 更新没有签名：**能修改本 fork Releases 的人（GitHub 账号或一次发布运行）可以发布已安装 Linux 客户端会接受的更新。Windows 的签名密钥同样存放在 GitHub，所以两者的风险边界都是这个 GitHub 账号。
 
 ## 已安装的客户端
 

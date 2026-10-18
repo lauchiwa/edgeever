@@ -1,4 +1,4 @@
-import { generateKeyPairSync } from "node:crypto";
+import { createHash, generateKeyPairSync } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -6,6 +6,8 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { FORK_WINDOWS_UPDATE_KEYS } from "../apps/desktop/src/main/fork-config.mjs";
 import { createWindowsUpdateMetadata } from "./create-windows-update-metadata.mjs";
+import { writeLinuxBuild } from "./fork-linux-release.fixture.mjs";
+import { linuxAppImageName, linuxReleaseAssetNames } from "./fork-linux-release.mjs";
 import { SIGNING_PASSPHRASE_ENV, releaseAssetNames, resolveSigningPassphrase, signAndPublishRelease } from "./fork-sign-release.mjs";
 
 const TAG = "v1.119.0-rc.0";
@@ -34,6 +36,11 @@ const draftRelease = async () => {
   mkdirSync(build);
   await writeFile(join(build, `EdgeEver-${VERSION}-windows-x64.exe`), "installer payload");
   await createWindowsUpdateMetadata({ directory: build, version: VERSION, trustedPublicKeys: keys.trusted });
+  // CI stages rc-linux.yml from electron-builder's latest-linux.yml.
+  writeLinuxBuild(build, VERSION);
+  writeFileSync(join(build, "rc-linux.yml"), readFileSync(join(build, "latest-linux.yml")));
+  writeFileSync(join(build, "SHA256SUMS-linux.txt"), `${createHash("sha256").update(readFileSync(join(build, linuxAppImageName(VERSION)))).digest("hex")}  ${linuxAppImageName(VERSION)}
+`);
   return { draft: true, prerelease: true, files: Object.fromEntries(releaseAssetNames(VERSION).map((name) => [name, readFileSync(join(build, name))])) };
 };
 
@@ -60,11 +67,14 @@ beforeEach(async () => {
 afterEach(() => rm(root, { recursive: true, force: true }));
 
 describe("fork release signing", () => {
-  test("signs a Draft, audits a fresh download of all five assets, then publishes it", async () => {
+  test("signs a Draft, audits a fresh download of every Windows and Linux asset, then publishes it", async () => {
     const release = await draftRelease();
+    expect(Object.keys(release.files)).toEqual(expect.arrayContaining(linuxReleaseAssetNames(VERSION)));
     const gh = fakeGitHub(release);
     const result = await signAndPublishRelease(options(gh, { publish: true }));
-    expect(result).toMatchObject({ tag: TAG, signed: true, keyId: FORK_WINDOWS_UPDATE_KEYS.primary.keyId, published: true });
+    expect(result).toMatchObject({
+      tag: TAG, signed: true, keyId: FORK_WINDOWS_UPDATE_KEYS.primary.keyId, appImage: linuxAppImageName(VERSION), published: true,
+    });
     expect(Object.keys(release.files)).toContain("latest-windows.json.sig");
     expect(release).toMatchObject({ draft: false, prerelease: true });
   });
@@ -90,6 +100,23 @@ describe("fork release signing", () => {
     };
     await expect(signAndPublishRelease(options(gh, { publish: true }))).rejects.toThrow();
     expect(release.draft).toBe(true);
+  });
+
+  test("never publishes when GitHub serves a tampered AppImage or Linux metadata", async () => {
+    for (const name of [linuxAppImageName(VERSION), "rc-linux.yml", "SHA256SUMS-linux.txt"]) {
+      const release = await draftRelease();
+      release.files[name] = Buffer.concat([release.files[name], Buffer.from("x")]);
+      await expect(signAndPublishRelease(options(fakeGitHub(release), { publish: true }))).rejects.toThrow();
+      expect(release.draft).toBe(true);
+    }
+  });
+
+  test("refuses a Draft without its Linux assets", async () => {
+    const release = await draftRelease();
+    delete release.files["rc-linux.yml"];
+    await expect(signAndPublishRelease(options(fakeGitHub(release), { publish: true }))).rejects.toThrow("must contain exactly");
+    expect(release.draft).toBe(true);
+    expect(Object.keys(release.files)).not.toContain("latest-windows.json.sig");
   });
 
   test("refuses published, non-pre-release, missing, or unexpected asset sets, and untrusted keys", async () => {

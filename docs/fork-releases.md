@@ -1,14 +1,13 @@
 # Fork releases (lauchiwa/edgeever)
 
 This repository is a customized fork of upstream EdgeEver (`tianma-if/edgeever`).
-It builds and publishes its own Windows desktop releases on its own Releases
-page, and installed fork clients update only from there. Upstream is never
+It builds and publishes its own Windows and Linux desktop releases on its own
+Releases page, and installed fork clients update only from there. Upstream is never
 written to. 中文：[fork-releases.zh-CN.md](fork-releases.zh-CN.md).
 
-Scope today: **Windows x64 desktop, plus the server image**
-`ghcr.io/lauchiwa/edgeever` (API and the browser Web app). macOS, Linux,
-Android and iOS fork builds are not published (Linux follows once Windows is
-proven). An Android **test build** exists only as a workflow artifact, see
+Scope today: **Windows x64 desktop, Linux x64 AppImage, plus the server
+image** `ghcr.io/lauchiwa/edgeever` (API and the browser Web app). macOS,
+Android and iOS fork builds are not published. An Android **test build** exists only as a workflow artifact, see
 [Android test build](#android-test-build). Fork-only features such as
 [encrypted notes](encrypted-notes.md) need both a fork client and a server
 running the fork image.
@@ -42,8 +41,9 @@ refuses a base below one already released.
 | Area | Fork behaviour | Guard |
 | --- | --- | --- |
 | Identity | `apps/desktop/src/main/fork-config.mjs` (+ renderer mirror `packages/shared/src/fork-config.ts`) | `scripts/fork-invariants.test.mjs` |
-| Updates | electron-builder publishes to and updates from this fork; channel file `rc.yml` | invariants, `windows-update-metadata.test.mjs` |
+| Updates | electron-builder publishes to and updates from this fork; channel files `rc.yml` (Windows) and `rc-linux.yml` (Linux) | invariants, `windows-update-metadata.test.mjs`, `fork-linux-release.test.mjs` |
 | Windows update trust | only this fork's Ed25519 keys, only `X.Y.Z-rc.N` | `windows-update-trust.test.mjs`, pinned fingerprints |
+| Linux update trust | as upstream's Linux Preview: HTTPS from this fork's Releases, the sha512 in `rc-linux.yml` (checked by electron-updater) and an independent `SHA256SUMS-linux.txt`; **no signed manifest** | `fork-linux-release.test.mjs`, a real AppImage update before publishing |
 | Links | diagnostics, feedback, desktop downloads point at the fork; server release notes point at the fork for a fork image (`vX.Y.Z-rc.N`) and upstream otherwise; deliberate upstream links remain (Android APK download, upstream server release notes, plugin docs, the mobile app's upstream update check and homepage link, poster fonts pinned to an upstream commit) | upstream-literal scan with an allowlist |
 | Android test build | same package `org.edgeever.mobile`, fork keystore; expo-updates and the in-app APK update are off, so upstream OTA updates never replace fork code; unlocks encrypted notes natively | invariants, `fork-workflows.test.mjs`, manifest check in `fork-android.yml` |
 | ACP | Windows ACP fixes | ACP tests, invariants |
@@ -122,13 +122,25 @@ collide with upstream's next ones.
    ```
 
 2. `fork-release.yml` does the rest, with no manual step:
-   - `windows` checks the tag is on `main`, runs the release gates
-     (including both pinned keys), applies the version, builds and launches
-     the Windows app, and uploads a **Draft** pre-release with the installer,
-     `rc.yml`, `latest-windows.json` and `SHA256SUMS-windows.txt`.
+   - `windows` and `linux` run in parallel with a read-only token and no
+     access to the signing key. Each checks the tag is on `main`, runs the
+     release gates (including both pinned keys), applies the version, and
+     builds and launches the app:
+     - `windows` produces the installer, `rc.yml`, `latest-windows.json` and
+       `SHA256SUMS-windows.txt`.
+     - `linux` builds on Ubuntu 22.04 (glibc 2.35 baseline) and produces the
+       AppImage, `rc-linux.yml` and `SHA256SUMS-linux.txt`. It then runs a
+       real update: an older AppImage downloads the new one from a local feed
+       serving only these assets, replaces itself and relaunches as the new
+       version. The older AppImage is the previous published fork release
+       with Linux assets, or, before one exists, this source built as
+       `0.0.1-rc.0`.
+   - `draft` runs only once both platforms pass and uploads all seven assets
+     as a **Draft** pre-release. A failure on either platform creates or
+     changes no Draft.
    - `publish` signs `latest-windows.json`, uploads the signature, downloads
-     all five assets again, audits them exactly as a client would, and
-     publishes only if that passes.
+     all eight assets again, audits the Windows and Linux assets exactly as a
+     client would, and publishes only if that passes.
 
    Clients never see Drafts, so a failure is safe to retry: fix the cause, then
    run the workflow manually with the same tag (Actions → Fork release →
@@ -143,7 +155,7 @@ collide with upstream's next ones.
 
 The same tag also triggers `fork-docker-image.yml`, which builds the server
 image (see below). The two workflows are independent: a failed image does not
-hold back the Windows release, and can be rebuilt by running the workflow
+hold back the desktop release, and can be rebuilt by running the workflow
 manually with the same tag.
 
 A tag with a wrong base does not need deleting; publish a correct, higher tag.
@@ -239,6 +251,24 @@ Installing: the package name matches upstream's but the signer differs, so
 Android refuses to install over the upstream app. Uninstall it first (its
 local cache and unsent offline edits are lost), install the fork APK, and log
 in again. Later fork builds install over each other.
+
+## Linux AppImage
+
+- For x64 distributions with glibc 2.35 or later (such as Ubuntu 22.04+).
+  AppImages need FUSE 2: install `libfuse2` on Ubuntu 22.04, `libfuse2t64` on
+  Ubuntu 24.04.
+- Download `EdgeEver-X.Y.Z-rc.N-linux-x64.AppImage` from Releases, optionally
+  check it with `sha256sum --check SHA256SUMS-linux.txt`, `chmod +x` it and run
+  it directly. **It updates itself only when the AppImage file is run
+  directly**, not when extracted or integrated by a third-party tool.
+- Updates download in the background and replace that AppImage file, so the
+  file and its directory must be writable by the user.
+- Upstream's Linux Preview (bare versions) does not update to a fork release;
+  download the fork AppImage by hand.
+- **Linux updates are not signed:** anyone who can change this fork's
+  Releases (the GitHub account or a release run) can ship an update installed
+  Linux clients accept. The Windows signing key is stored in GitHub as well,
+  so for both platforms the boundary is this GitHub account.
 
 ## Installed clients
 
