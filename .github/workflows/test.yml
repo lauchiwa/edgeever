@@ -1,6 +1,6 @@
 name: Test
 
-# Runs the non-E2E regression suite, type checks and the web build for every
+# Runs the non-E2E regression suite, lint, type checks and the web build for every
 # pull request and every push to main, so failures surface before a release
 # instead of in the release workflow.
 on:
@@ -51,6 +51,9 @@ jobs:
             fi
             sleep "$((15 * attempt))"
           done
+
+      - name: Lint
+        run: bun run lint
 
       - name: Type check
         run: bun run typecheck

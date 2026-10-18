@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type InfiniteData, type QueryKey } from "@tanstack/react-query";
 import * as Clipboard from "expo-clipboard";
 import type { ListMemosResponse, MemoFilterMode, MemoSortMode } from "@edgeever/client";
@@ -20,7 +20,7 @@ import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context"
 import { Alert, Pressable, Text } from "../components/LocalizedText";
 import { ApiRequestError } from "@edgeever/client";
 import { DEFAULT_MEMO_TITLE, getNotebookScopeIds, hasDiagramDocumentMarker, markdownToDoc, type MemoDetail, type MemoSummary, type Notebook } from "@edgeever/shared";
-import { MOBILE_UI_METRICS, toggleMobileMemoFilterMode } from "@edgeever/shared/mobile-ui";
+import { MOBILE_UI_METRICS } from "@edgeever/shared/mobile-ui";
 import { clearMobileMemoDraft, readMobileMemoDraft, type MobileMemoDraft } from "../lib/mobile-drafts";
 import {
   readMobileImageCompressionEnabled,
@@ -29,10 +29,9 @@ import {
   writeMobileImageCompressionEnabled,
   saveMobileShowDescendantNotes,
   writeMobileMemoListDensity,
-  type MobileLocalePreference,
   type MobileMemoListDensity,
 } from "../lib/preferences";
-import { localizeUntitledMemoTitle, localizeMissingNotebookName, useMobileLocale } from "../lib/mobile-locale";
+import { localizeUntitledMemoTitle, localizeMissingNotebookName, toMobileSyncErrorSourceText, useMobileLocale } from "../lib/mobile-locale";
 import { useSession } from "../lib/session";
 import {
   clearMobileMemoUpdateQueueItem,
@@ -46,7 +45,6 @@ import {
   markMobileMemoUpdateError,
   queueMobileMemoUpdate,
   shouldQueueMobileMemoSaveError,
-  type MobileSyncQueueItem,
 } from "../lib/sync-queue";
 import { deleteMobileMemos } from "../lib/mobile-memo-delete";
 import { removeMobileMemosFromListCache } from "../lib/mobile-memo-list-cache";
@@ -56,13 +54,10 @@ import {
   listLocalMemos,
   listLocalNotebooks,
   upsertLocalNotebook,
-  listLocalTags,
   resolveLocalMemo,
   syncMobileLocalMirror,
   upsertLocalMemo,
-  type MobileBootstrapProgress,
 } from "../lib/local-mirror";
-import { AccountSecurityPanel } from "./AccountSecurityModal";
 import { beginEditorStartup, markStartup } from "../lib/startup-performance";
 import { assertNotEncryptedNote, isMobileEncryptedNote } from "../lib/mobile-encrypted-note";
 import { mobileEncryptedNoteVault } from "../lib/mobile-encrypted-note-vault";
@@ -88,11 +83,7 @@ import { useMobileLocalMirrorSync } from "../hooks/useMobileLocalMirrorSync";
 import { useMobileWorkspaceSelection } from "../hooks/useMobileWorkspaceSelection";
 import {
   flattenNotebooks,
-  formatMemoPreviewDate,
-  getResolvedMobileLocale,
-  getTextSearchMatches,
   isEnglishMobileLocale,
-  parseTags,
 } from "./workspace-utils";
 import {
   applyOptimisticMemoToCache,
@@ -202,6 +193,10 @@ export const WorkspaceScreen = ({
   const memoDraftPrefetchRef = useRef(new Map<string, Promise<MobileMemoDraft | null>>());
   const memoDraftValueRef = useRef(new Map<string, MobileMemoDraft | null>());
   const processedShareUrlRef = useRef<string | null>(null);
+  const incomingShareTaskRef = useRef<object | null>(null);
+  useEffect(() => () => {
+    incomingShareTaskRef.current = null;
+  }, []);
   const onIncomingShareHandledRef = useRef(onIncomingShareHandled);
   onIncomingShareHandledRef.current = onIncomingShareHandled;
   const debouncedSearchText = useDebouncedValue(searchText.trim(), 250);
@@ -516,7 +511,7 @@ export const WorkspaceScreen = ({
     ? syncQueueItems.find((item) => item.memoId === selectedMemo.id) ?? null
     : null;
   const selectedMemoSyncStatus = selectedMemoSyncItem?.status ?? null;
-  const selectedMemoSyncError = selectedMemoSyncItem?.lastError ?? null;
+  const selectedMemoSyncError = toMobileSyncErrorSourceText(selectedMemoSyncItem?.lastError ?? null);
   const isRefreshing = notebooksQuery.isFetching || memosQuery.isFetching || searchQuery.isFetching || memoDetailQuery.isFetching;
   const selectedMemoIdList = Array.from(selectedMemoIds);
   const selectedMemos = visibleMemos.filter((memo) => selectedMemoIds.has(memo.id));
@@ -670,37 +665,36 @@ export const WorkspaceScreen = ({
       return;
     }
 
-    let active = true;
+    // Payload resolution and notebook refreshes rerun this effect. They must not
+    // cancel an accepted clip or skip its cleanup just because its URL is unchanged.
+    const task = {};
+    incomingShareTaskRef.current = task;
+    const isActive = () => incomingShareTaskRef.current === task;
     processedShareUrlRef.current = sourceUrl;
     setIsImportingShare(true);
     if (isWeChatArticleUrl(sourceUrl)) {
       setIncomingClipCaptureUrl(sourceUrl);
-      return () => {
-        active = false;
-      };
+      return;
     }
     void buildMobileWebClipDraft(sourceUrl, { locale: resolvedLocale })
       .then((draft) => {
-        if (!active) {
+        if (!isActive()) {
           return;
         }
         openIncomingClipDraft(draft);
       })
       .catch(() => {
-        if (active) {
+        if (isActive()) {
           Alert.alert("剪藏失败", "无法读取分享的网页，请稍后重试。");
         }
       })
       .finally(() => {
-        if (active) {
+        if (isActive()) {
+          incomingShareTaskRef.current = null;
           setIsImportingShare(false);
           onIncomingShareHandledRef.current?.();
         }
       });
-
-    return () => {
-      active = false;
-    };
   }, [
     incomingShareError,
     incomingShareIsResolving,
@@ -1085,10 +1079,6 @@ export const WorkspaceScreen = ({
       Alert.alert("删除失败", error instanceof Error ? error.message : "请检查网络后重试");
     },
   });
-
-  const handleTogglePin = (memo: MemoDetail) => {
-    updateMemoMutation.mutate({ memo, payload: { isPinned: !memo.isPinned } });
-  };
 
   const handleDeleteMemo = (memo: MemoDetail) => {
     const permanent = memoView === "trash" || memo.isDeleted;

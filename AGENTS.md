@@ -52,6 +52,8 @@
 Related Issue: #<issue-number>
 ```
 
+12. **外部贡献者署名**：维护者本人无需署名；外部贡献逐条注明账号与 PR，或集中致谢。正文名单不重复列名，保留 GitHub 原生 Contributors 头像区。参数用法见 `docs/release.zh-CN.md` / `docs/release.md`。
+
 ## 二开 fork 约束（lauchiwa/edgeever）
 
 - **发布与更新**：本仓库是上游二开 fork，只发布 Windows x64 桌面版，版本号 `vX.Y.Z-rc.N`，禁止发布不带后缀的 `vX.Y.Z`。改动发布、更新或同步流程前必须阅读 [二开版发布](docs/fork-releases.zh-CN.md)（English: [Fork releases](docs/fork-releases.md)）。上文“GitHub Actions 与 Release 约束”描述的是上游官方仓库流程，不适用于本 fork 的发布。

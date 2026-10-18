@@ -76,12 +76,21 @@ jobs:
           fetch-depth: 0
 
       - name: Build local image
-        run: docker build --build-arg EDGE_EVER_BUILD_ID="${GITHUB_SHA}" --tag edgeever:ci .
+        run: |
+          docker build \
+            --build-arg EDGE_EVER_BUILD_ID="${GITHUB_SHA}" \
+            --build-arg EDGE_EVER_BUILD_CREATED_AT="2026-01-02T03:04:05Z" \
+            --build-arg EDGE_EVER_BUILD_TRIGGER=main_push \
+            --build-arg EDGE_EVER_BUILD_METHOD=github_actions \
+            --tag edgeever:ci .
+          docker build --tag edgeever:ci-default .
 
       - name: Start container
         run: |
           docker run --detach --name edgeever-ci \
             --env EDGE_EVER_AUTH_PASSWORD=container-ci-password \
+            --env EDGE_EVER_DEPLOYMENT_TRIGGER=manual \
+            --env EDGE_EVER_DEPLOYMENT_METHOD=docker \
             --publish 127.0.0.1:8787:8787 \
             edgeever:ci
 
@@ -94,6 +103,8 @@ jobs:
             sleep 1
           done
           echo "${health}" | jq -e '.ok == true and .runtime == "self-hosted-bun" and .authMode == "required"'
+          echo "${health}" | jq -e '.buildCreatedAt == "2026-01-02T03:04:05.000Z" and .buildProvenance == {"trigger": "main_push", "method": "github_actions"}'
+          echo "${health}" | jq -e '.deployment == {"trigger": "manual", "method": "docker"} and .deploymentVersionCreatedAt == null and .containerImageSource == "unknown"'
           curl --fail --silent --show-error http://127.0.0.1:8787/ | grep -F '<!doctype html>'
           docker exec edgeever-ci test -f /data/edgeever.sqlite
           docker exec edgeever-ci test -d /data/resources
@@ -109,9 +120,29 @@ jobs:
           docker stop --timeout 30 edgeever-ci
           docker logs edgeever-ci | grep -F '[self-hosted] shutdown complete'
 
+      - name: Verify a default self-built image reports unknown build metadata
+        run: |
+          docker run --detach --name edgeever-ci-default \
+            --env EDGE_EVER_AUTH_PASSWORD=container-ci-password \
+            --env EDGE_EVER_BUILD_TRIGGER=not-a-trigger \
+            --env EDGE_EVER_BUILD_CREATED_AT=not-a-date \
+            --publish 127.0.0.1:8788:8787 \
+            edgeever:ci-default
+          for attempt in $(seq 1 60); do
+            if health="$(curl --fail --silent --show-error http://127.0.0.1:8788/api/health)"; then
+              break
+            fi
+            sleep 1
+          done
+          echo "${health}" | jq -e '.build == "unknown" and .buildCreatedAt == null and .buildProvenance == {"trigger": "unknown", "method": "unknown"}'
+          echo "${health}" | jq -e '.deployment == {"trigger": "unknown", "method": "unknown"} and .deploymentVersionCreatedAt == null'
+          docker stop --timeout 30 edgeever-ci-default
+
       - name: Show container logs on failure
         if: failure()
-        run: docker logs edgeever-ci || true
+        run: |
+          docker logs edgeever-ci || true
+          docker logs edgeever-ci-default || true
 
   publish:
     if: >-
@@ -135,6 +166,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
+          echo "created_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "${GITHUB_OUTPUT}"
           if [[ -n "${RELEASE_TAG}" ]]; then
             if [[ ! "${RELEASE_TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
               echo "release_tag must match vX.Y.Z" >&2
@@ -153,6 +185,7 @@ jobs:
               exit 1
             fi
             {
+              echo "build_trigger=github_release"
               echo "tags<<EOF"
               echo "${GHCR_IMAGE_NAME}:${RELEASE_TAG}"
               echo "${GHCR_IMAGE_NAME}:${version}"
@@ -163,7 +196,14 @@ jobs:
             } >> "${GITHUB_OUTPUT}"
           else
             short_sha="${GITHUB_SHA:0:12}"
+            # A dispatch without release_tag is an ad-hoc rebuild of main.
+            if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
+              build_trigger=main_push
+            else
+              build_trigger=manual
+            fi
             {
+              echo "build_trigger=${build_trigger}"
               echo "tags<<EOF"
               echo "${GHCR_IMAGE_NAME}:main"
               echo "${GHCR_IMAGE_NAME}:sha-${short_sha}"
@@ -192,12 +232,16 @@ jobs:
           context: .
           build-args: |
             EDGE_EVER_BUILD_ID=${{ github.sha }}
+            EDGE_EVER_BUILD_CREATED_AT=${{ steps.image.outputs.created_at }}
+            EDGE_EVER_BUILD_TRIGGER=${{ steps.image.outputs.build_trigger }}
+            EDGE_EVER_BUILD_METHOD=github_actions
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.image.outputs.tags }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.created=${{ steps.image.outputs.created_at }}
             org.opencontainers.image.version=${{ steps.image.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -224,6 +268,7 @@ jobs:
             sleep 1
           done
           echo "${health}" | jq -e '.ok == true and .runtime == "self-hosted-bun" and .authMode == "required"'
+          echo "${health}" | jq -e --arg trigger "${{ steps.image.outputs.build_trigger }}" '.buildProvenance == {"trigger": $trigger, "method": "github_actions"} and (.buildCreatedAt | type) == "string"'
           curl --fail --silent --show-error http://127.0.0.1:8787/ | grep -F '<!doctype html>'
           docker exec "${container_name}" test -s /app/scripts/self-hosted-server.js
           docker exec "${container_name}" test -s /app/scripts/self-hosted-server.mjs

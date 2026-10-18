@@ -1,26 +1,41 @@
 {
-  "version": "1.120.0",
+  "version": "1.122.0",
   "changes": {
     "en-US": [
-      "Duplicate a note together with independent copies of its images and attachments from the note actions menu.",
-      "Refine note image sharing with curated layouts, coordinated typography and neutral colors for the white theme.",
-      "Expand Web Clipper support for article and specialized platforms, including WeChat, Juejin, Douban, Jike and BOSS Zhipin, with improved content and image capture.",
-      "Pasted links no longer include adjacent Chinese, Japanese or Korean prose.",
-      "Improve desktop AI process cleanup by waiting for process closure before removing temporary workspaces."
+      "Use all 23 poster fonts across typography pickers and improve built-in poster font pairings.",
+      "Fix overlapping poster elements and preserve consistent card sections when switching templates.",
+      "Show QR codes for note and notebook share links. Thanks @dkoryto (#610).",
+      "Show Docker image build and deployment information in System information. Thanks @dkoryto (#602).",
+      "Localize untitled notes and diagrams on public share pages. Thanks @dkoryto (#605).",
+      "Keep public share and form links out of search indexes and shared caches, and prevent share tokens from leaking through referrers. Thanks @dkoryto (#608).",
+      "Improve browser clipping across supported platforms, including Jike, Medium and social posts. Thanks @sivdead (#611).",
+      "Fix empty note bodies when sharing posts to the iOS app (#601).",
+      "Prevent already handled Android shares from restarting clipping when returning to the app.",
+      "Clarify the manual Cloudflare deployment instructions on the website. Thanks @dkoryto (#604)."
     ],
     "zh-CN": [
-      "支持从笔记操作菜单复制笔记，同时独立复制图片与附件。",
-      "优化笔记图片分享的主题排版与字体搭配，并修正白色主题的配色。",
-      "扩展网页剪藏对微信公众号、掘金、豆瓣、即刻、BOSS 直聘等文章及垂直平台的支持，改善正文和图片采集。",
-      "修复粘贴链接时将相邻中日韩文字误识别为网址的问题。",
-      "改善桌面 AI 进程清理，等待进程完全关闭后再清理临时工作区。"
+      "字体选择统一支持全部 23 款海报字体，并优化内置海报模板的字体搭配。",
+      "修复海报元素重叠，并在切换模板时保持卡片分区一致。",
+      "笔记和笔记本分享链接新增二维码。感谢 @dkoryto（#610）。",
+      "系统信息新增 Docker 镜像构建和部署信息。感谢 @dkoryto（#602）。",
+      "公开分享页面中的未命名笔记和图表跟随界面语言。感谢 @dkoryto（#605）。",
+      "为公开分享和表单链接添加禁止搜索收录与共享缓存策略，防止来源信息泄露分享令牌。感谢 @dkoryto（#608）。",
+      "改进即刻、Medium 和社交帖子等平台的浏览器剪藏。感谢 @sivdead（#611）。",
+      "修复向 iOS 应用分享帖子时笔记正文可能为空的问题（#601）。",
+      "修复返回 Android 应用时已处理的分享可能重复启动剪藏的问题。",
+      "完善官网的 Cloudflare 手动部署指引。感谢 @dkoryto（#604）。"
     ],
     "ja": [
-      "ノート操作メニューから、画像と添付ファイルの独立したコピーを含むノートの複製に対応しました。",
-      "ノート画像共有のレイアウトと書体の組み合わせを改善し、白いテーマの配色を調整しました。",
-      "Web ClipperのWeChat、Juejin、Douban、Jike、BOSS Zhipinなどの記事・専門プラットフォームへの対応を拡張し、本文と画像の取得を改善しました。",
-      "リンク貼り付け時に隣接する中国語・日本語・韓国語の文章をURLに含める問題を修正しました。",
-      "デスクトップAIプロセスの終了を待ってから一時ワークスペースを削除するよう改善しました。"
+      "文字設定で全23種類のポスターフォントを選択でき、標準テンプレートの組み合わせも改善しました。",
+      "ポスター要素の重なりを修正し、テンプレート切り替え時のカード構成を改善しました。",
+      "ノートとノートブックの共有リンクにQRコードを追加しました。@dkoryto (#610)。",
+      "システム情報にDockerイメージのビルドとデプロイ情報を表示します。@dkoryto (#602)。",
+      "公開共有ページの無題ノートと図表名を画面の言語に合わせます。@dkoryto (#605)。",
+      "公開共有とフォームの検索登録・共有キャッシュを抑制し、リファラー経由のトークン漏洩を防ぎます。@dkoryto (#608)。",
+      "即刻、Medium、SNS投稿などのブラウザークリップを改善しました。@sivdead (#611)。",
+      "iOSアプリに投稿を共有した際に本文が空になる問題を修正しました (#601)。",
+      "Androidでアプリに戻った際、処理済みの共有が再度クリップされる問題を修正しました。",
+      "公式サイトのCloudflare手動デプロイ手順を明確にしました。@dkoryto (#604)。"
     ]
   }
 }
