@@ -34,6 +34,7 @@ const ALLOWED_UPSTREAM = {
   // Unreachable in the fork APK: app.config.ts disables expo-updates, which hides the update card.
   "apps/mobile/src/lib/mobile-release.ts": { count: 3, why: "upstream APK update check, disabled in fork builds" },
   "apps/mobile/src/screens/LoginScreen.tsx": { count: 1, why: "project homepage link on the login screen" },
+  "packages/shared/src/font-catalog.ts": { count: 15, why: "poster fonts pinned to an upstream commit with sha256, not repository identity" },
 };
 const SCANNED = ["apps/desktop/src", "apps/web/src", "apps/mobile/src", "apps/mobile/modules", "packages/shared/src"];
 // Also catches regex-escaped forms such as tianma-if\/edgeever, which hard-code

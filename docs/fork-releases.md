@@ -44,7 +44,7 @@ refuses a base below one already released.
 | Identity | `apps/desktop/src/main/fork-config.mjs` (+ renderer mirror `packages/shared/src/fork-config.ts`) | `scripts/fork-invariants.test.mjs` |
 | Updates | electron-builder publishes to and updates from this fork; channel file `rc.yml` | invariants, `windows-update-metadata.test.mjs` |
 | Windows update trust | only this fork's Ed25519 keys, only `X.Y.Z-rc.N` | `windows-update-trust.test.mjs`, pinned fingerprints |
-| Links | diagnostics, feedback, desktop downloads point at the fork; server release notes point at the fork for a fork image (`vX.Y.Z-rc.N`) and upstream otherwise; deliberate upstream links remain (Android APK download, upstream server release notes, plugin docs, the mobile app's upstream update check and homepage link) | upstream-literal scan with an allowlist |
+| Links | diagnostics, feedback, desktop downloads point at the fork; server release notes point at the fork for a fork image (`vX.Y.Z-rc.N`) and upstream otherwise; deliberate upstream links remain (Android APK download, upstream server release notes, plugin docs, the mobile app's upstream update check and homepage link, poster fonts pinned to an upstream commit) | upstream-literal scan with an allowlist |
 | Android test build | same package `org.edgeever.mobile`, fork keystore; expo-updates and the in-app APK update are off, so upstream OTA updates never replace fork code; unlocks encrypted notes natively | invariants, `fork-workflows.test.mjs`, manifest check in `fork-android.yml` |
 | ACP | Windows ACP fixes | ACP tests, invariants |
 | Encrypted notes | client-side encryption; the server refuses plaintext overwrites and advertises `features.encryptedNotes` | `encrypted-note*.test.mjs`, `tests/e2e/encrypted-note.spec.ts` |
