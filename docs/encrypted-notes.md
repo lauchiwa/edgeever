@@ -44,10 +44,11 @@ Automated tests cover:
 - merge refusal and MCP redaction;
 - the Android crypto core against WebCrypto in both directions (on a desktop JVM), and the Android vault, autosave reload rules and local placeholder text.
 
-Verified by hand: unlocking an encrypted note in the browser against a fork server (v1.120.0-rc.1).
+Verified by hand:
+- unlocking an encrypted note in the browser against a fork server (v1.120.0-rc.1);
+- the signed fork Android test build (1.120.0, `714a494`) on a real device: unlocking and reading notes created on other clients, edits made on Android syncing back to them, auto-lock after 15 idle minutes, the blocked image and attachment actions, and no upstream update prompt.
 
 Not yet verified:
 - the Windows desktop app end to end;
 - upgrading a real deployment from the upstream image;
-- the fork Android app on a real device: Gradle build of the native module, unlock time, the editor and autosave;
 - the behaviour of upstream mobile apps on a real device.
