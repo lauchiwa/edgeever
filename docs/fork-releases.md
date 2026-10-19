@@ -1,14 +1,13 @@
 # Fork releases (lauchiwa/edgeever)
 
 This repository is a customized fork of upstream EdgeEver (`tianma-if/edgeever`).
-It builds and publishes its own Windows desktop releases on its own Releases
-page, and installed fork clients update only from there. Upstream is never
+It builds and publishes its own Windows, Linux and macOS desktop releases on its own
+Releases page, and installed fork clients update only from there. Upstream is never
 written to. 中文：[fork-releases.zh-CN.md](fork-releases.zh-CN.md).
 
-Scope today: **Windows x64 desktop, plus the server image**
-`ghcr.io/lauchiwa/edgeever` (API and the browser Web app). macOS, Linux,
-Android and iOS fork builds are not published (Linux follows once Windows is
-proven). An Android **test build** exists only as a workflow artifact, see
+Scope today: **Windows x64 desktop, Linux x64 AppImage, macOS arm64 and x64
+(see [macOS](#macos)), plus the server image** `ghcr.io/lauchiwa/edgeever`
+(API and the browser Web app). Android and iOS fork builds are not published. An Android **test build** exists only as a workflow artifact, see
 [Android test build](#android-test-build). Fork-only features such as
 [encrypted notes](encrypted-notes.md) need both a fork client and a server
 running the fork image.
@@ -42,8 +41,10 @@ refuses a base below one already released.
 | Area | Fork behaviour | Guard |
 | --- | --- | --- |
 | Identity | `apps/desktop/src/main/fork-config.mjs` (+ renderer mirror `packages/shared/src/fork-config.ts`) | `scripts/fork-invariants.test.mjs` |
-| Updates | electron-builder publishes to and updates from this fork; channel file `rc.yml` | invariants, `windows-update-metadata.test.mjs` |
+| Updates | electron-builder publishes to and updates from this fork; channel files `rc.yml` (Windows), `rc-linux.yml` (Linux) and `rc-mac.yml` (macOS) | invariants, `windows-update-metadata.test.mjs`, `fork-linux-release.test.mjs`, `fork-macos-release.test.mjs` |
 | Windows update trust | only this fork's Ed25519 keys, only `X.Y.Z-rc.N` | `windows-update-trust.test.mjs`, pinned fingerprints |
+| Linux update trust | as upstream's Linux Preview: HTTPS from this fork's Releases, the sha512 in `rc-linux.yml` (checked by electron-updater) and an independent `SHA256SUMS-linux.txt`; **no signed manifest** | `fork-linux-release.test.mjs`, a real AppImage update before publishing |
+| macOS update trust | apps signed with this fork's self-signed certificate; Squirrel.Mac installs an update only if it satisfies the running app's designated requirement (bundle id `org.edgeever.desktop` and the SHA-1 of either pinned certificate), after electron-updater checks the sha512 in `rc-mac.yml`; `SHA256SUMS-macos.txt` lists every zip and disk image. Not notarized | `fork-macos-release.test.mjs`, invariants, a real signed-app update on each architecture before publishing |
 | Links | diagnostics, feedback, desktop downloads point at the fork; server release notes point at the fork for a fork image (`vX.Y.Z-rc.N`) and upstream otherwise; deliberate upstream links remain (Android APK download, upstream server release notes, plugin docs, the mobile app's upstream update check and homepage link, poster fonts pinned to an upstream commit) | upstream-literal scan with an allowlist |
 | Android test build | same package `org.edgeever.mobile`, fork keystore; expo-updates and the in-app APK update are off, so upstream OTA updates never replace fork code; unlocks encrypted notes natively | invariants, `fork-workflows.test.mjs`, manifest check in `fork-android.yml` |
 | ACP | Windows ACP fixes | ACP tests, invariants |
@@ -78,6 +79,65 @@ still undo the fork, for example by adding a new `tianma-if/edgeever` literal.
 - Losing both private keys means installed clients can no longer auto-update;
   they must reinstall by hand. Keep backups in a password manager or on
   encrypted offline storage.
+
+### macOS signing certificates
+
+Without an Apple Developer ID, macOS releases are code-signed with two
+self-signed certificates (RSA-3072, 20 years): the **primary** signs every
+release; the **backup** stays cold for a rotation release. Every fork app
+carries a designated requirement naming both, so a later app signed by either
+installs over it; a third certificate needs a release signed by one of these
+two first. Losing both private keys means installed Macs must reinstall by
+hand.
+
+One-time setup, by the maintainer (the agent never reads the keys or
+passphrases). It can be done on a Mac or on Windows:
+
+1. Create the Environment: Settings → Environments → New environment
+   `fork-macos`, with the same deployment rules as `fork-release`. Set them
+   before adding any secret.
+2. From the repository (Node 24; the passphrases are typed hidden, use two new
+   ones of at least 16 characters). On a Mac, in Terminal:
+
+   ```sh
+   node scripts/fork-generate-macos-signing-certificates.mjs
+   ```
+
+   On Windows, in PowerShell or Windows Terminal (Git Bash cannot hide input):
+
+   ```powershell
+   node scripts/fork-generate-macos-signing-certificates.mjs --skip-self-test
+   ```
+
+   On a Mac it signs a test binary with each identity in a throwaway keychain
+   and checks the result before writing anything (`"selfTested": true`).
+   Elsewhere that self-test is skipped (`"selfTested": false`): the
+   `macos-sign` and `macos-verify` jobs still check the primary before any
+   release is published, but the backup is not exercised until it signs a
+   rotation release, so test it on a Mac when one is available. Signing a
+   release locally also needs a Mac. Either way it writes the encrypted keys
+   and `macos-signing-certificates.json` to `~/.config/edgeever-fork`
+   (`%USERPROFILE%\.config\edgeever-fork` on Windows) and prints both
+   certificates.
+3. Pin both `certificatePem` values in `FORK_MACOS_SIGNING_CERTIFICATES` in
+   `apps/desktop/src/main/fork-config.mjs` through a pull request. Until then
+   the release gates refuse to build a release.
+4. Store the primary key and its passphrase. On a Mac:
+
+   ```sh
+   gh secret set FORK_MACOS_SIGNING_KEY --env fork-macos -R lauchiwa/edgeever < ~/.config/edgeever-fork/macos-signing-rsa-primary.pem
+   gh secret set FORK_MACOS_SIGNING_PASSPHRASE --env fork-macos -R lauchiwa/edgeever
+   ```
+
+   On Windows:
+
+   ```powershell
+   cmd /c "gh secret set FORK_MACOS_SIGNING_KEY --env fork-macos -R lauchiwa/edgeever < %USERPROFILE%\.config\edgeever-fork\macos-signing-rsa-primary.pem"
+   gh secret set FORK_MACOS_SIGNING_PASSPHRASE --env fork-macos -R lauchiwa/edgeever
+   ```
+
+5. Move `macos-signing-rsa-backup.pem` to offline storage, and keep both
+   passphrases in a password manager.
 
 ## Syncing an upstream release
 
@@ -122,13 +182,36 @@ collide with upstream's next ones.
    ```
 
 2. `fork-release.yml` does the rest, with no manual step:
-   - `windows` checks the tag is on `main`, runs the release gates
-     (including both pinned keys), applies the version, builds and launches
-     the Windows app, and uploads a **Draft** pre-release with the installer,
-     `rc.yml`, `latest-windows.json` and `SHA256SUMS-windows.txt`.
+   - `windows`, `linux` and `macos` (arm64 and x64) run in parallel with a
+     read-only token and no access to any signing key. Each checks the tag is on `main`, runs the
+     release gates (including both pinned keys), applies the version, and
+     builds and launches the app:
+     - `windows` produces the installer, `rc.yml`, `latest-windows.json` and
+       `SHA256SUMS-windows.txt`.
+     - `linux` builds on Ubuntu 22.04 (glibc 2.35 baseline) and produces the
+       AppImage, `rc-linux.yml` and `SHA256SUMS-linux.txt`. It then runs a
+       real update: an older AppImage downloads the new one from a local feed
+       serving only these assets, replaces itself and relaunches as the new
+       version. The older AppImage is the previous published fork release
+       with Linux assets, or, before one exists, this source built as
+       `0.0.1-rc.0`.
+     - `macos` builds the unsigned app for each architecture, plus its update
+       predecessor (chosen the same way as for Linux).
+   - `macos-sign` runs in the `fork-macos` Environment, installs nothing, and
+     signs both apps (and a built predecessor) with the primary certificate,
+     then packs each into a zip, a disk image, `rc-mac.yml` and
+     `SHA256SUMS-macos.txt`.
+   - `macos-verify` checks the signatures, launches each signed app, and runs
+     a real update on each architecture: the older signed app downloads the
+     new zip from a local feed, Squirrel.Mac checks it against the running
+     app's requirement and replaces the bundle, which must then hold exactly
+     the signed app.
+   - `draft` runs only once every platform passes and uploads all thirteen
+     assets as a **Draft** pre-release. A failure on any platform creates or
+     changes no Draft.
    - `publish` signs `latest-windows.json`, uploads the signature, downloads
-     all five assets again, audits them exactly as a client would, and
-     publishes only if that passes.
+     all fourteen assets again, audits the Windows, Linux and macOS assets
+     exactly as a client would, and publishes only if that passes.
 
    Clients never see Drafts, so a failure is safe to retry: fix the cause, then
    run the workflow manually with the same tag (Actions → Fork release →
@@ -143,7 +226,7 @@ collide with upstream's next ones.
 
 The same tag also triggers `fork-docker-image.yml`, which builds the server
 image (see below). The two workflows are independent: a failed image does not
-hold back the Windows release, and can be rebuilt by running the workflow
+hold back the desktop release, and can be rebuilt by running the workflow
 manually with the same tag.
 
 A tag with a wrong base does not need deleting; publish a correct, higher tag.
@@ -239,6 +322,46 @@ Installing: the package name matches upstream's but the signer differs, so
 Android refuses to install over the upstream app. Uninstall it first (its
 local cache and unsent offline edits are lost), install the fork APK, and log
 in again. Later fork builds install over each other.
+
+## Linux AppImage
+
+- For x64 distributions with glibc 2.35 or later (such as Ubuntu 22.04+).
+  AppImages need FUSE 2: install `libfuse2` on Ubuntu 22.04, `libfuse2t64` on
+  Ubuntu 24.04.
+- Download `EdgeEver-X.Y.Z-rc.N-linux-x64.AppImage` from Releases, optionally
+  check it with `sha256sum --check SHA256SUMS-linux.txt`, `chmod +x` it and run
+  it directly. **It updates itself only when the AppImage file is run
+  directly**, not when extracted or integrated by a third-party tool.
+- Updates download in the background and replace that AppImage file, so the
+  file and its directory must be writable by the user.
+- Upstream's Linux Preview (bare versions) does not update to a fork release;
+  download the fork AppImage by hand.
+- **Linux updates are not signed:** anyone who can change this fork's
+  Releases (the GitHub account or a release run) can ship an update installed
+  Linux clients accept. The Windows signing key is stored in GitHub as well,
+  so for both platforms the boundary is this GitHub account.
+
+## macOS
+
+- Two downloads: `EdgeEver-X.Y.Z-rc.N-mac-arm64.dmg` (Apple silicon) and
+  `-mac-x64.dmg` (Intel), for macOS 13 or later. Optionally check them with
+  `shasum -a 256 -c SHA256SUMS-macos.txt` (other lines report missing files).
+- **The app is not notarized, so Gatekeeper blocks its first launch.** Drag
+  EdgeEver into Applications from the disk image, open it once, then allow it
+  in System Settings → Privacy & Security → Open Anyway. Or remove the
+  download flag in Terminal: `xattr -dr com.apple.quarantine /Applications/EdgeEver.app`.
+- Updates download the full zip in the background (no blockmaps, so no
+  differential downloads) and install when the app restarts. The app must stay
+  in a folder the user can write to, such as `/Applications`.
+- The fork keeps upstream's bundle id, so it replaces an upstream install and
+  keeps its data, but the two never update each other: their designated
+  requirements differ. Over an upstream install, macOS will likely ask once
+  whether EdgeEver may use the "EdgeEver Safe Storage" keychain item (choose
+  Always Allow); denying it signs the desktop app out.
+- **macOS updates are trusted through the fork's certificate**, whose key is
+  stored in GitHub like the Windows one: for every platform the boundary is
+  this GitHub account.
+- The WeChat share extension ships signed with the same certificate.
 
 ## Installed clients
 

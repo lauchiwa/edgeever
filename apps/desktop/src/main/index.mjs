@@ -78,7 +78,8 @@ import {
 
 const { autoUpdater } = electronUpdater;
 
-const linuxUpdateTestMode = process.platform === "linux"
+// Fork: the macOS release gate reuses this test mode (scripts/fork-verify-macos-app-update.mjs).
+const linuxUpdateTestMode = (process.platform === "linux" || process.platform === "darwin")
   && process.env.GITHUB_ACTIONS === "true"
   && process.env.EDGE_EVER_DESKTOP_UPDATE_TEST === "1";
 const linuxUpdateTestFeedUrl = linuxUpdateTestMode
