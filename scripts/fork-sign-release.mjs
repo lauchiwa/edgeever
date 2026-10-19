@@ -9,10 +9,12 @@
 //
 // Steps: check the Draft and its exact asset set, download the Windows assets,
 // sign latest-windows.json unless already signed, upload the signature,
-// download every asset again (Windows and Linux) and audit them exactly as a
-// client would, then (with --publish) publish it as a pre-release. Any
+// download every asset again (Windows, Linux and macOS) and audit them exactly
+// as a client would, then (with --publish) publish it as a pre-release. Any
 // failure leaves it a Draft, which clients never see. Linux has no signature:
 // its AppImage, rc-linux.yml and checksum list must agree with each other.
+// macOS apps were code-signed by the macos-sign job; here their zips, disk
+// images, rc-mac.yml and checksum list must agree (code signatures need macOS).
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -23,6 +25,7 @@ import { FORK_REPOSITORY } from "../apps/desktop/src/main/fork-config.mjs";
 import { WINDOWS_UPDATE_MANIFEST_NAME, WINDOWS_UPDATE_SIGNATURE_NAME } from "../apps/desktop/src/main/windows-update-trust.mjs";
 import { WINDOWS_UPDATE_CHANNEL_FILE } from "./create-windows-update-metadata.mjs";
 import { linuxReleaseAssetNames, verifyLinuxRelease } from "./fork-linux-release.mjs";
+import { macReleaseAssetNames, verifyMacRelease } from "./fork-macos-release.mjs";
 import { parseForkTag } from "./fork-release-version.mjs";
 import { promptHidden } from "./fork-secret-prompt.mjs";
 import { signWindowsUpdateManifest } from "./sign-windows-update-manifest.mjs";
@@ -36,7 +39,9 @@ export const windowsReleaseAssetNames = (version) => [
 ];
 
 // Every asset of an unsigned Draft, as uploaded by fork-release.yml.
-export const releaseAssetNames = (version) => [...windowsReleaseAssetNames(version), ...linuxReleaseAssetNames(version)];
+export const releaseAssetNames = (version) => [
+  ...windowsReleaseAssetNames(version), ...linuxReleaseAssetNames(version), ...macReleaseAssetNames(version),
+];
 
 const sha256 = (path) => createHash("sha256").update(readFileSync(path)).digest("hex");
 
@@ -74,6 +79,7 @@ export const signAndPublishRelease = async ({
   const windowsUnsigned = windowsReleaseAssetNames(version);
   const windowsSigned = [...windowsUnsigned, WINDOWS_UPDATE_SIGNATURE_NAME];
   const linux = linuxReleaseAssetNames(version);
+  const mac = macReleaseAssetNames(version);
   const keyOptions = trustedPublicKeys ? { trustedPublicKeys } : {};
   try {
     const release = gh.release(tag);
@@ -109,6 +115,7 @@ export const signAndPublishRelease = async ({
     const audit = join(workDirectory, "audit");
     gh.download(tag, windowsSigned, join(audit, "windows"));
     gh.download(tag, linux, join(audit, "linux"));
+    gh.download(tag, mac, join(audit, "macos"));
     const verified = await verifyWindowsUpdateRelease(join(audit, "windows"), keyOptions);
     if (sign) {
       for (const name of windowsSigned) {
@@ -116,10 +123,12 @@ export const signAndPublishRelease = async ({
       }
     }
     const linuxVerified = verifyLinuxRelease(join(audit, "linux"), version);
+    const macVerified = verifyMacRelease(join(audit, "macos"), version);
     if (publish) gh.publish(tag);
     return {
       tag, version, signed: sign, keyId: verified.keyId ?? keyId, installer: verified.file.name, sha256: verified.file.sha256,
-      appImage: linuxVerified.file.name, appImageSha256: linuxVerified.file.sha256, published: publish,
+      appImage: linuxVerified.file.name, appImageSha256: linuxVerified.file.sha256,
+      macAssets: macVerified.files.map(({ name, sha256: digest }) => ({ name, sha256: digest })), published: publish,
     };
   } finally {
     rmSync(workDirectory, { recursive: true, force: true });

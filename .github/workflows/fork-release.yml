@@ -1,14 +1,22 @@
 name: Fork release
 
-# Builds, signs and publishes this fork's Windows x64 and Linux x64 release.
-# Pushing a tag vX.Y.Z-rc.N runs it end to end (see docs/fork-releases.md).
+# Builds, signs and publishes this fork's Windows x64, Linux x64 and macOS
+# arm64/x64 release. Pushing a tag vX.Y.Z-rc.N runs it end to end (see
+# docs/fork-releases.md).
 #
-# - windows, linux: build and verify each platform in parallel and keep the
-#   assets as workflow artifacts. They have no access to the signing key and
-#   only a read token, so the build tools and npm dependencies they run never
-#   see the key and cannot change a release. linux also runs a real update
+# - windows, linux, macos: build and verify each platform in parallel and keep
+#   the assets as workflow artifacts. They have no access to any signing key
+#   and only a read token, so the build tools and npm dependencies they run
+#   never see a key and cannot change a release. linux also runs a real update
 #   from an older AppImage to the new one.
-# - draft: once both pass, uploads all assets as an unsigned Draft
+# - macos-sign: the only job in the fork-macos Environment, which holds the
+#   macOS primary signing key. It installs nothing and runs only the
+#   repository's dependency-free scripts from the workflow commit: it signs
+#   both unsigned apps (and a built update predecessor) with the self-signed
+#   certificate pinned in fork-config.mjs and packs the zips and disk images.
+# - macos-verify: launches the signed apps and runs a real update from an
+#   older signed app to the new one, on each architecture.
+# - draft: once all pass, uploads all assets as an unsigned Draft
 #   pre-release. It installs and runs nothing from the repository.
 # - publish: the only job in the fork-release Environment, which holds the
 #   primary key. It installs nothing and runs only the repository's
@@ -281,10 +289,288 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  macos:
+    if: github.repository == 'lauchiwa/edgeever'
+    name: Build macOS ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+            unpacked: mac-arm64
+          - arch: x64
+            runner: macos-15-intel
+            unpacked: mac
+    defaults:
+      run:
+        shell: bash
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+      ARCH: ${{ matrix.arch }}
+      UNPACKED: ${{ matrix.unpacked }}
+      # No Developer ID: electron-builder leaves the app unsigned and macos-sign signs it.
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: Check the tag
+        run: |
+          set -euo pipefail
+          node scripts/fork-release-version.mjs check "${TAG}"
+          git fetch origin main
+          git merge-base --is-ancestor "${TAG}^{commit}" origin/main || {
+            echo "::error::${TAG} is not on main. Release only reviewed, merged commits."; exit 1; }
+          if gh release view "${TAG}" -R "${GITHUB_REPOSITORY}" --json isDraft --jq .isDraft 2>/dev/null | grep -qx false; then
+            echo "::error::${TAG} is already published; a published release is never rebuilt."; exit 1
+          fi
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies
+        run: |
+          for attempt in 1 2 3; do
+            bun install --frozen-lockfile && exit 0
+            [ "$attempt" = "3" ] && exit 1
+            sleep "$((15 * attempt))"
+          done
+
+      # Gates check the reviewed source exactly as tagged, before anything is rewritten.
+      - name: Release gates
+        env:
+          EDGE_EVER_FORK_RELEASE: "1"
+        run: |
+          set -euo pipefail
+          bun test scripts/fork-invariants.test.mjs scripts/fork-macos-release.test.mjs
+
+      # main keeps the bare upstream version; the release version comes from the tag.
+      - name: Apply the release version
+        run: node scripts/fork-release-version.mjs apply "${TAG}"
+
+      - name: Build Web renderer
+        env:
+          EDGE_EVER_DESKTOP_BUILD: "1"
+        run: bun run build:web
+
+      - name: Build ${{ matrix.arch }} Rust sidecar
+        run: cargo build --manifest-path crates/desktop-sidecar/Cargo.toml --release
+
+      # The update gate starts from the previous published fork zip for this
+      # architecture, as installed clients do. Before one exists, it builds this
+      # source at an older rc version (signed by macos-sign), so the first macOS
+      # release still replaces a real one.
+      - name: Get the update predecessor
+        run: |
+          set -euo pipefail
+          build="${RUNNER_TEMP}/fork-macos"
+          mkdir -p "${build}"
+          gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/releases?per_page=100" > "${RUNNER_TEMP}/releases.json"
+          previous="$(node -e '
+            const releases = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).flat();
+            const pattern = new RegExp(`^EdgeEver-.+-mac-${process.argv[3]}\\.zip$`);
+            const found = releases.find((release) => !release.draft && release.tag_name !== process.argv[2]
+              && release.assets.some((asset) => pattern.test(asset.name)));
+            process.stdout.write(found ? found.tag_name : "");
+          ' "${RUNNER_TEMP}/releases.json" "${TAG}" "${ARCH}")"
+          if [[ -n "${previous}" ]]; then
+            source=release
+            version="${previous#v}"
+            directory="${RUNNER_TEMP}/previous-macos"
+            name="EdgeEver-${version}-mac-${ARCH}.zip"
+            gh release download "${previous}" -R "${GITHUB_REPOSITORY}" --dir "${directory}" \
+              -p "${name}" -p SHA256SUMS-macos.txt
+            line="$(awk -v name="${name}" '$2 == name' "${directory}/SHA256SUMS-macos.txt")"
+            [[ -n "${line}" ]] || { echo "::error::${name} is not listed in SHA256SUMS-macos.txt"; exit 1; }
+            (cd "${directory}" && printf '%s\n' "${line}" | shasum -a 256 -c -)
+            mv "${directory}/${name}" "${build}/predecessor.zip"
+          else
+            source=built
+            version=0.0.1-rc.0
+            previous="v0.0.1-rc.0 (built from this source)"
+            backup="${RUNNER_TEMP}/edgeever-desktop-package.json"
+            cp apps/desktop/package.json "${backup}"
+            trap 'cp "${backup}" apps/desktop/package.json' EXIT
+            node -e '
+              const fs = require("fs");
+              const path = "apps/desktop/package.json";
+              const text = fs.readFileSync(path, "utf8");
+              const { version } = JSON.parse(text);
+              fs.writeFileSync(path, text.replace(`"version": "${version}"`, "\"version\": \"0.0.1-rc.0\""));
+            '
+            grep -q '"version": "0.0.1-rc.0"' apps/desktop/package.json
+            EDGE_EVER_DESKTOP_TARGET=mac EDGE_EVER_DESKTOP_ARCH="${ARCH}" bun scripts/run-desktop-builder.mjs --publish never
+            ditto -c -k --sequesterRsrc --keepParent "release/desktop/${UNPACKED}/EdgeEver.app" "${build}/predecessor.zip"
+            rm -rf release/desktop
+          fi
+          node -e 'require("fs").writeFileSync(process.argv[1], JSON.stringify({ source: process.argv[2], version: process.argv[3] }))' \
+            "${build}/predecessor.json" "${source}" "${version}"
+          echo "Update predecessor (${ARCH}): ${previous}" >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Package macOS app
+        env:
+          EDGE_EVER_DESKTOP_ARCH: ${{ matrix.arch }}
+          EDGE_EVER_DESKTOP_TARGET: mac
+        run: bun scripts/run-desktop-builder.mjs --publish never
+
+      # Before verify-desktop-package, which removes the unpacked app.
+      - name: Keep the unsigned app
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent "release/desktop/${UNPACKED}/EdgeEver.app" \
+            "${RUNNER_TEMP}/fork-macos/EdgeEver.app.zip"
+
+      # Launch tests run in macos-verify, on the signed app that ships.
+      - name: Verify package
+        env:
+          EDGE_EVER_DESKTOP_ARCH: ${{ matrix.arch }}
+          EDGE_EVER_VERIFY_TARGET: darwin
+        run: bun scripts/verify-desktop-package.mjs
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: fork-macos-build-${{ matrix.arch }}
+          path: ${{ runner.temp }}/fork-macos/*
+          if-no-files-found: error
+          retention-days: 7
+
+  macos-sign:
+    if: github.repository == 'lauchiwa/edgeever'
+    name: Sign macOS apps
+    needs: macos
+    runs-on: macos-15
+    timeout-minutes: 30
+    environment: fork-macos
+    defaults:
+      run:
+        shell: bash
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+    steps:
+      # The signing tools come from the workflow commit (the tag itself, or
+      # main for a manual run), never from an arbitrary input ref.
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - uses: actions/download-artifact@v7
+        with:
+          name: fork-macos-build-arm64
+          path: ${{ runner.temp }}/builds/arm64
+      - uses: actions/download-artifact@v7
+        with:
+          name: fork-macos-build-x64
+          path: ${{ runner.temp }}/builds/x64
+
+      - name: Sign and pack
+        env:
+          SIGNING_KEY_PEM: ${{ secrets.FORK_MACOS_SIGNING_KEY }}
+          EDGE_EVER_MACOS_SIGNING_PASSPHRASE: ${{ secrets.FORK_MACOS_SIGNING_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${SIGNING_KEY_PEM}" ]]; then
+            echo "::error::Add the FORK_MACOS_SIGNING_KEY secret to the fork-macos environment (docs/fork-releases.md)."; exit 1
+          fi
+          key="${RUNNER_TEMP}/macos-signing-key.pem"
+          trap 'rm -f "${key}"' EXIT
+          (umask 077; printf '%s\n' "${SIGNING_KEY_PEM}" > "${key}")
+          EDGE_EVER_MACOS_SIGNING_KEY="${key}" node scripts/fork-macos-release.mjs sign-release \
+            "${RUNNER_TEMP}/builds" "${RUNNER_TEMP}/fork-release" "${RUNNER_TEMP}/predecessors" "${TAG#v}"
+          ls -la "${RUNNER_TEMP}/fork-release"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: fork-release-macos
+          path: ${{ runner.temp }}/fork-release/*
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@v7
+        with:
+          name: fork-macos-predecessors
+          path: ${{ runner.temp }}/predecessors/*
+          if-no-files-found: error
+          retention-days: 7
+
+  macos-verify:
+    if: github.repository == 'lauchiwa/edgeever'
+    name: Verify signed macOS ${{ matrix.arch }}
+    needs: macos-sign
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+          - arch: x64
+            runner: macos-15-intel
+    defaults:
+      run:
+        shell: bash
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      ARCH: ${{ matrix.arch }}
+    steps:
+      # The same commit as macos-sign, so both check the same pinned certificates.
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+
+      - uses: actions/download-artifact@v7
+        with:
+          name: fork-release-macos
+          path: ${{ runner.temp }}/fork-release
+      - uses: actions/download-artifact@v7
+        with:
+          name: fork-macos-predecessors
+          path: ${{ runner.temp }}/predecessors
+
+      - name: Check the signed assets
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          stage="${RUNNER_TEMP}/fork-release"
+          node scripts/fork-macos-release.mjs verify "${stage}" "${version}"
+          (cd "${stage}" && shasum -a 256 -c SHA256SUMS-macos.txt)
+          node scripts/fork-macos-release.mjs check-dmg "${stage}/EdgeEver-${version}-mac-${ARCH}.dmg" "${version}" "${ARCH}"
+          node scripts/fork-macos-release.mjs check-zip "${stage}/EdgeEver-${version}-mac-${ARCH}.zip" \
+            "${RUNNER_TEMP}/signed" "${version}" "${ARCH}"
+
+      - name: Verify first launch of the signed app
+        env:
+          EDGE_EVER_DESKTOP_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          bun run verify:packaged-desktop-startup -- "${RUNNER_TEMP}/signed/EdgeEver.app/Contents/MacOS/EdgeEver"
+          bun run verify:desktop-protocol-e2e -- "${RUNNER_TEMP}/signed/EdgeEver.app/Contents/MacOS/EdgeEver"
+
+      - name: Verify real automatic update
+        run: |
+          bun scripts/fork-verify-macos-app-update.mjs \
+            "${RUNNER_TEMP}/predecessors/${ARCH}.zip" "${RUNNER_TEMP}/fork-release" "${TAG#v}" "${ARCH}"
+
   draft:
     if: github.repository == 'lauchiwa/edgeever'
     name: Upload Draft pre-release
-    needs: [windows, linux]
+    needs: [windows, linux, macos-verify]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -308,8 +594,8 @@ jobs:
           base="${version%-rc.*}"
           ls -la "${stage}"
           notes="$(printf '%s\n' \
-            "## 主要更新" "" "- 基于上游 EdgeEver v${base} 的二开版本（Windows x64、Linux x64 AppImage）。" "" \
-            "## Key Changes" "" "- Fork build of this repository, synced from upstream EdgeEver v${base} (Windows x64, Linux x64 AppImage).")"
+            "## 主要更新" "" "- 基于上游 EdgeEver v${base} 的二开版本（Windows x64、Linux x64 AppImage、macOS arm64/x64）。" "" \
+            "## Key Changes" "" "- Fork build of this repository, synced from upstream EdgeEver v${base} (Windows x64, Linux x64 AppImage, macOS arm64/x64).")"
           if gh release view "${TAG}" -R "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
             if [[ "$(gh release view "${TAG}" -R "${GITHUB_REPOSITORY}" --json isDraft --jq .isDraft)" != "true" ]]; then
               echo "::error::${TAG} is already published; a published release is never rebuilt."; exit 1
@@ -365,5 +651,5 @@ jobs:
           {
             echo "### Published ${TAG}"
             echo
-            echo "Windows signed; Windows and Linux assets audited from a fresh download; published as a pre-release."
+            echo "Windows signed; Windows, Linux and macOS assets audited from a fresh download; published as a pre-release."
           } >> "${GITHUB_STEP_SUMMARY}"

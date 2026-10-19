@@ -1,6 +1,7 @@
 // Guards the fork's workflows: they run only in the fork, only the release's
-// publish job can reach the signing key (the build jobs only a read token) (and only the Android sign job the
-// keystore), and upstream's snapshot sync stays out of the fork's own files.
+// publish job can reach the Windows signing key and only its macos-sign job the
+// macOS one (the build jobs only a read token), only the Android sign job the
+// keystore, and upstream's snapshot sync stays out of the fork's own files.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
@@ -38,9 +39,9 @@ describe("fork workflows", () => {
     return Object.fromEntries(starts.map((match, index) => [match[1], block.slice(match.index, starts[index + 1]?.index)]));
   };
 
-  test("only the publish job can reach the signing key, and it runs nothing it installs", () => {
+  test("only the publish and macos-sign jobs can reach a signing key, and they run nothing they install", () => {
     const text = workflow("fork-release.yml");
-    const { windows, linux, draft, publish, ...others } = jobsOf(text);
+    const { windows, linux, macos, "macos-sign": macosSign, "macos-verify": macosVerify, draft, publish, ...others } = jobsOf(text);
     expect(Object.keys(others)).toEqual([]);
     // Nothing outside the jobs (workflow env, defaults) may carry a secret,
     // and the default token cannot write.
@@ -49,13 +50,31 @@ describe("fork workflows", () => {
 
     // The build jobs run npm dependencies: no key, no Environment, no write
     // token, no release changes. They only hand artifacts to draft.
-    for (const build of [windows, linux]) {
+    for (const build of [windows, linux, macos]) {
       expect(build).not.toMatch(/secrets\.|environment:|SIGNING|permissions:|gh release (?:create|upload|edit|delete)/);
-      expect(build).not.toContain("fork-sign-release");
+      expect(build).not.toMatch(/fork-sign-release|sign-release/);
       expect(build).toContain("actions/upload-artifact@");
     }
+    // The signed apps are launched and updated without any key.
+    expect(macosVerify).not.toMatch(/secrets\.|environment:|SIGNING|permissions:|sign-release|gh release/);
+    expect(macosVerify).toMatch(/^    needs: macos-sign\s*$/m);
 
-    expect(draft).toMatch(/^    needs: \[windows, linux\]\s*$/m);
+    // macos-sign holds the macOS key: Node only, no dependency install, the
+    // workflow commit's scripts, and it can neither write nor touch the release.
+    expect(macosSign).toMatch(/^    environment: fork-macos\s*$/m);
+    expect(macosSign).toMatch(/^    needs: macos\s*$/m);
+    expect([...macosSign.matchAll(/secrets\.(\w+)/g)].map((match) => match[1]).sort())
+      .toEqual(["FORK_MACOS_SIGNING_KEY", "FORK_MACOS_SIGNING_PASSPHRASE"]);
+    expect(macosSign).not.toMatch(/bun |npm |npx |pnpm |yarn |setup-bun|cache:|permissions:|GH_TOKEN|gh release/);
+    expect(macosSign).toContain("ref: ${{ github.sha }}");
+    expect(macosSign).toContain("persist-credentials: false");
+    expect(macosSign).toContain("umask 077");
+    expect(macosSign).toMatch(/trap 'rm -f "\$\{key\}"' EXIT/);
+    expect(macosSign).toContain("node scripts/fork-macos-release.mjs sign-release");
+    // Only the publish job's and macos-sign's secrets exist in the workflow.
+    expect([...text.matchAll(/secrets\.(\w+)/g)].length).toBe(4);
+
+    expect(draft).toMatch(/^    needs: \[windows, linux, macos-verify\]\s*$/m);
     expect(draft).toMatch(/^    permissions:\s*\n      contents: write\s*$/m);
     expect(draft).not.toMatch(/secrets\.|environment:|actions\/checkout|bun |npm |node /);
 
@@ -90,7 +109,7 @@ describe("fork workflows", () => {
 
   // The publish job installs nothing, so the signing script must only import
   // Node built-ins and repository files (no npm package can reach the key).
-  test("the signing script only imports Node built-ins and repository files", () => {
+  const importClosure = (entry) => {
     const seen = new Set();
     const visit = (file) => {
       if (seen.has(file)) return;
@@ -102,8 +121,41 @@ describe("fork workflows", () => {
         visit(join(file, "..", specifier));
       }
     };
-    visit(join(root, "scripts", "fork-sign-release.mjs"));
-    expect(seen.size).toBeGreaterThan(5);
+    visit(join(root, "scripts", entry));
+    return seen;
+  };
+  test("the signing scripts only import Node built-ins and repository files", () => {
+    expect(importClosure("fork-sign-release.mjs").size).toBeGreaterThan(5);
+    expect(importClosure("fork-macos-release.mjs").size).toBeGreaterThan(1);
+    // macos-verify runs the gate without installing dependencies either.
+    expect(importClosure("fork-verify-macos-app-update.mjs").size).toBeGreaterThan(1);
+    // The maintainer generates the macOS certificates on a Mac with plain Node.
+    expect(importClosure("fork-generate-macos-signing-certificates.mjs").size).toBeGreaterThan(2);
+  });
+
+  // macOS ships only signed apps that launched and replaced an older signed app.
+  test("the macOS jobs build both architectures, sign once, then launch and update each signed app", () => {
+    const { macos, "macos-sign": macosSign, "macos-verify": macosVerify } = jobsOf(workflow("fork-release.yml"));
+    for (const job of [macos, macosVerify]) {
+      expect(job).toMatch(/- arch: arm64\s*\n\s*runner: macos-15\s*$/m);
+      expect(job).toMatch(/- arch: x64\s*\n\s*runner: macos-15-intel\s*$/m);
+    }
+    expect(macos).toContain('CSC_IDENTITY_AUTO_DISCOVERY: "false"');
+    expect(macos).toContain("EDGE_EVER_VERIFY_TARGET: darwin");
+    const step = (job, name) => job.search(new RegExp(`^\\s*- name: ${name}\\s*$`, "m"));
+    const buildOrder = ["Get the update predecessor", "Package macOS app", "Keep the unsigned app", "Verify package"].map((name) => step(macos, name));
+    expect(Math.min(...buildOrder)).toBeGreaterThan(-1);
+    expect(buildOrder).toEqual([...buildOrder].sort((a, b) => a - b));
+    expect(macos).toContain("shasum -a 256 -c -");
+    expect(macosSign).toContain("name: fork-release-macos");
+    expect(macosSign).toContain("name: fork-macos-predecessors");
+    const verifyOrder = ["Check the signed assets", "Verify first launch of the signed app", "Verify real automatic update"].map((name) => step(macosVerify, name));
+    expect(Math.min(...verifyOrder)).toBeGreaterThan(-1);
+    expect(verifyOrder).toEqual([...verifyOrder].sort((a, b) => a - b));
+    expect(macosVerify).toContain("verify:packaged-desktop-startup");
+    expect(macosVerify).toContain("verify:desktop-protocol-e2e");
+    expect(macosVerify).toContain("bun scripts/fork-verify-macos-app-update.mjs");
+    expect(macosVerify).not.toContain("bun install");
   });
 
   test("the release workflow only builds rc tags and only from main", () => {
@@ -119,8 +171,8 @@ describe("fork workflows", () => {
   // The gates assert that main carries the bare upstream version, so they must
   // run on the tagged source before the rc version is written into it.
   test("the release gates run before the release version is applied, and both before the build", () => {
-    const { windows, linux } = jobsOf(workflow("fork-release.yml"));
-    for (const job of [windows, linux]) {
+    const { windows, linux, macos } = jobsOf(workflow("fork-release.yml"));
+    for (const job of [windows, linux, macos]) {
       const step = (name) => job.search(new RegExp(`^\\s*- name: ${name}\\s*$`, "m"));
       const [gates, apply, build] = ["Release gates", "Apply the release version", "Build Web renderer"].map(step);
       expect(Math.min(gates, apply, build)).toBeGreaterThan(-1);

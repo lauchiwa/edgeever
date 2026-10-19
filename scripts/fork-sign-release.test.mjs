@@ -8,6 +8,8 @@ import { FORK_WINDOWS_UPDATE_KEYS } from "../apps/desktop/src/main/fork-config.m
 import { createWindowsUpdateMetadata } from "./create-windows-update-metadata.mjs";
 import { writeLinuxBuild } from "./fork-linux-release.fixture.mjs";
 import { linuxAppImageName, linuxReleaseAssetNames } from "./fork-linux-release.mjs";
+import { writeMacRelease } from "./fork-macos-release.fixture.mjs";
+import { macDmgName, macReleaseAssetNames, macZipName } from "./fork-macos-release.mjs";
 import { SIGNING_PASSPHRASE_ENV, releaseAssetNames, resolveSigningPassphrase, signAndPublishRelease } from "./fork-sign-release.mjs";
 
 const TAG = "v1.119.0-rc.0";
@@ -41,6 +43,7 @@ const draftRelease = async () => {
   writeFileSync(join(build, "rc-linux.yml"), readFileSync(join(build, "latest-linux.yml")));
   writeFileSync(join(build, "SHA256SUMS-linux.txt"), `${createHash("sha256").update(readFileSync(join(build, linuxAppImageName(VERSION)))).digest("hex")}  ${linuxAppImageName(VERSION)}
 `);
+  writeMacRelease(build, VERSION);
   return { draft: true, prerelease: true, files: Object.fromEntries(releaseAssetNames(VERSION).map((name) => [name, readFileSync(join(build, name))])) };
 };
 
@@ -67,14 +70,15 @@ beforeEach(async () => {
 afterEach(() => rm(root, { recursive: true, force: true }));
 
 describe("fork release signing", () => {
-  test("signs a Draft, audits a fresh download of every Windows and Linux asset, then publishes it", async () => {
+  test("signs a Draft, audits a fresh download of every Windows, Linux and macOS asset, then publishes it", async () => {
     const release = await draftRelease();
-    expect(Object.keys(release.files)).toEqual(expect.arrayContaining(linuxReleaseAssetNames(VERSION)));
+    expect(Object.keys(release.files)).toEqual(expect.arrayContaining([...linuxReleaseAssetNames(VERSION), ...macReleaseAssetNames(VERSION)]));
     const gh = fakeGitHub(release);
     const result = await signAndPublishRelease(options(gh, { publish: true }));
     expect(result).toMatchObject({
       tag: TAG, signed: true, keyId: FORK_WINDOWS_UPDATE_KEYS.primary.keyId, appImage: linuxAppImageName(VERSION), published: true,
     });
+    expect(result.macAssets.map((asset) => asset.name)).toEqual(macReleaseAssetNames(VERSION).slice(0, 4));
     expect(Object.keys(release.files)).toContain("latest-windows.json.sig");
     expect(release).toMatchObject({ draft: false, prerelease: true });
   });
@@ -109,6 +113,22 @@ describe("fork release signing", () => {
       await expect(signAndPublishRelease(options(fakeGitHub(release), { publish: true }))).rejects.toThrow();
       expect(release.draft).toBe(true);
     }
+  });
+
+  test("never publishes when GitHub serves a tampered macOS zip, disk image or metadata", async () => {
+    for (const name of [macZipName(VERSION, "arm64"), macDmgName(VERSION, "x64"), "rc-mac.yml", "SHA256SUMS-macos.txt"]) {
+      const release = await draftRelease();
+      release.files[name] = Buffer.concat([release.files[name], Buffer.from("x")]);
+      await expect(signAndPublishRelease(options(fakeGitHub(release), { publish: true }))).rejects.toThrow();
+      expect(release.draft).toBe(true);
+    }
+  });
+
+  test("refuses a Draft without its macOS assets", async () => {
+    const release = await draftRelease();
+    delete release.files[macZipName(VERSION, "x64")];
+    await expect(signAndPublishRelease(options(fakeGitHub(release), { publish: true }))).rejects.toThrow("must contain exactly");
+    expect(release.draft).toBe(true);
   });
 
   test("refuses a Draft without its Linux assets", async () => {

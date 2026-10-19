@@ -7,6 +7,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 import {
+  FORK_MACOS_BUNDLE_ID,
   FORK_NEW_ISSUE_URL,
   FORK_RELEASE_CHANNEL,
   FORK_RELEASES_URL,
@@ -18,6 +19,8 @@ import {
 } from "../apps/desktop/src/main/fork-config.mjs";
 import * as sharedForkConfig from "../packages/shared/src/fork-config.ts";
 import { WINDOWS_UPDATE_PUBLIC_KEYS } from "../apps/desktop/src/main/windows-update-trust.mjs";
+import { assertCodeSigningCertificate } from "./fork-generate-macos-signing-certificates.mjs";
+import { macDesignatedRequirement, macZipName, pinnedMacCertificates } from "./fork-macos-release.mjs";
 
 const UPSTREAM = "tianma-if/edgeever";
 const UPSTREAM_WINDOWS_KEY_ID = "edgeever-windows-update-2026-01";
@@ -123,6 +126,33 @@ describe("fork Windows update trust", () => {
       return key.export({ type: "spki", format: "der" }).toString("base64");
     });
     expect(new Set(exported).size).toBe(2);
+  });
+});
+
+describe("fork macOS update trust", () => {
+  // Squirrel.Mac installs an update only if it satisfies the running app's
+  // designated requirement, which names this bundle id.
+  test("signs the bundle id electron-builder builds, as zip and dmg named as releases expect", () => {
+    const builder = read("apps/desktop/electron-builder.yml");
+    expect(builder).toMatch(new RegExp(`^appId: ${FORK_MACOS_BUNDLE_ID.replaceAll(".", "\\.")}\\s*$`, "m"));
+    expect(builder).toMatch(/^mac:[\s\S]*?- target: dmg\s*\n\s*- target: zip\s*\n\s*artifactName: EdgeEver-\$\{version\}-mac-\$\{arch\}\.\$\{ext\}\s*$/m);
+    expect(macZipName("1.0.0-rc.0", "arm64")).toBe("EdgeEver-1.0.0-rc.0-mac-arm64.zip");
+  });
+
+  // The release gate replaces an older signed app through this test mode.
+  test("the update test mode still covers macOS", () => {
+    expect(read("apps/desktop/src/main/index.mjs")).toMatch(
+      /const linuxUpdateTestMode = \(process\.platform === "linux" \|\| process\.platform === "darwin"\)\s*\n\s*&& process\.env\.GITHUB_ACTIONS === "true"/,
+    );
+  });
+
+  // Enforced by the release workflow (EDGE_EVER_FORK_RELEASE=1): a macOS
+  // release must carry a requirement that a backup-signed release can satisfy.
+  test.skipIf(process.env.EDGE_EVER_FORK_RELEASE !== "1")("a release pins two distinct code-signing certificates", () => {
+    const { primary, backup } = pinnedMacCertificates();
+    for (const { pem } of [primary, backup]) assertCodeSigningCertificate(pem);
+    expect(primary.sha1).not.toBe(backup.sha1);
+    expect(macDesignatedRequirement()).toContain(`identifier "${FORK_MACOS_BUNDLE_ID}"`);
   });
 });
 
