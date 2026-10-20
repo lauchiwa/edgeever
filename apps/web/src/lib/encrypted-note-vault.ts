@@ -1,7 +1,10 @@
 import {
   ENCRYPTED_NOTE_PBKDF2_ITERATIONS,
   createEncryptedNoteSalt,
+  createSecretBlockKdf,
   decryptNoteDoc,
+  decryptSecretBlockText,
+  encryptSecretBlockText,
   deriveEncryptedNoteKey,
   encryptNoteDoc,
   serializeEncryptedNoteEnvelope,
@@ -149,4 +152,35 @@ export const encryptWithEncryptedNoteVault = async (
   const envelope = await encryptNoteDoc(doc, await keyFor(secret, params.salt, params.iterations), params);
   touchEncryptedNoteVault();
   return { envelope, contentMarkdown: serializeEncryptedNoteEnvelope(envelope) };
+};
+
+/** Opens a secret block with the session passphrase. Null when locked or the passphrase does not fit. */
+export const decryptSecretBlockWithVault = async (envelope: EncryptedNoteEnvelope) => {
+  const secret = passphrase;
+  if (!secret) return null;
+  try {
+    const text = await decryptSecretBlockText(envelope, await keyFor(secret, envelope.kdf.salt, envelope.kdf.iterations));
+    touchEncryptedNoteVault();
+    return text;
+  } catch {
+    return null;
+  }
+};
+
+/** Opens a secret block with a typed passphrase; on success it becomes the session passphrase. Throws on a wrong one. */
+export const unlockSecretBlock = async (scope: string, envelope: EncryptedNoteEnvelope, secret: string) => {
+  const text = await decryptSecretBlockText(envelope, await deriveEncryptedNoteKey(secret, envelope.kdf.salt, envelope.kdf.iterations));
+  setSessionPassphrase(secret);
+  if (!readVerifier(scope)) await writeVerifier(scope, secret);
+  return text;
+};
+
+/** Seals secret block text with the session passphrase, reusing the note's block salt when given. */
+export const encryptSecretBlockWithVault = async (text: string, kdf?: { salt: string; iterations: number } | null) => {
+  const secret = passphrase;
+  if (!secret) throw new Error("Encrypted note vault is locked.");
+  const params = kdf ?? createSecretBlockKdf();
+  const envelope = await encryptSecretBlockText(text, await keyFor(secret, params.salt, params.iterations), params);
+  touchEncryptedNoteVault();
+  return envelope;
 };

@@ -20,6 +20,7 @@ import {
   Heading6,
   Link,
   List,
+  LockKeyhole,
   ListOrdered,
   ListTodo,
   Pilcrow,
@@ -61,7 +62,8 @@ export type SlashCommandId =
   | "current-date-time"
   | "attachment"
   | "note-link"
-  | "external-link";
+  | "external-link"
+  | "secret";
 
 type SlashCommandGroup = "suggested" | "basic" | "insert";
 type SlashCommandIcon = ComponentType<{ className?: string }>;
@@ -71,7 +73,7 @@ export type SlashCommandLabels = {
   empty: string;
   close: string;
   groups: Record<SlashCommandGroup, string>;
-  items: Record<SlashCommandId, string>;
+  items: Record<Exclude<SlashCommandId, "secret">, string> & { secret?: string };
 };
 
 export type SlashCommandActions = {
@@ -80,6 +82,9 @@ export type SlashCommandActions = {
   openExternalLinkPicker: () => void;
   openNoteLinkPicker: () => void;
   openMathFormula: (kind: "inline" | "block", range?: { from: number; to: number }) => void;
+  /** Fork: inline secret blocks, offered only when the server protects them. */
+  canInsertSecretBlock?: () => boolean;
+  openSecretBlock?: () => void;
 };
 
 export type SlashCommandItem = {
@@ -104,7 +109,7 @@ export const formatCurrentTime = (date: Date) =>
 export const formatCurrentDateTime = (date: Date) =>
   `${formatCurrentDate(date)} ${formatCurrentTime(date)}`;
 
-export const createSlashCommandItems = (labels: SlashCommandLabels): SlashCommandItem[] => [
+export const createSlashCommandItems = (labels: SlashCommandLabels, options: { secretBlock?: boolean } = {}): SlashCommandItem[] => [
   { id: "ai", command: "ai", group: "suggested", icon: Bot, label: labels.items.ai, keywords: ["assistant", "人工智能", "智能", "写作"] },
   { id: "paragraph", command: "text", group: "basic", icon: Pilcrow, label: labels.items.paragraph, keywords: ["paragraph", "正文", "文本"] },
   { id: "heading-1", command: "h1", group: "basic", icon: Heading1, label: labels.items["heading-1"], keywords: ["heading", "标题"] },
@@ -129,6 +134,7 @@ export const createSlashCommandItems = (labels: SlashCommandLabels): SlashComman
   { id: "attachment", command: "upload", group: "insert", icon: FileUp, label: labels.items.attachment, keywords: ["file", "attachment", "文件", "上传", "附件"] },
   { id: "note-link", command: "note", group: "insert", icon: Link, label: labels.items["note-link"], keywords: ["link", "memo", "笔记", "引用"] },
   { id: "external-link", command: "link", group: "insert", icon: Link, label: labels.items["external-link"], keywords: ["url", "web", "链接", "网址"] },
+  ...(options.secretBlock ? [{ id: "secret", command: "secret", group: "insert", icon: LockKeyhole, label: labels.items.secret ?? "", keywords: ["password", "credential", "encrypt", "密码", "密钥", "加密", "凭据"] } satisfies SlashCommandItem] : []),
 ];
 
 export const filterSlashCommandItems = (items: SlashCommandItem[], query: string) => {
@@ -277,6 +283,10 @@ const runSlashCommand = ({
       chain.run();
       window.requestAnimationFrame(actions.openExternalLinkPicker);
       break;
+    case "secret":
+      chain.run();
+      if (actions.openSecretBlock) window.requestAnimationFrame(actions.openSecretBlock);
+      break;
   }
 };
 
@@ -289,7 +299,7 @@ export const createSlashCommandExtension = ({
 }) => Extension.create({
   name: "edgeeverSlashCommand",
   addProseMirrorPlugins() {
-    const initialItems = createSlashCommandItems(getLabels());
+    const initialItems = createSlashCommandItems(getLabels(), { secretBlock: actions.canInsertSecretBlock?.() });
     return [Suggestion<SlashCommandItem, SlashCommandItem>({
       editor: this.editor,
       pluginKey: slashCommandPluginKey,
@@ -303,7 +313,7 @@ export const createSlashCommandExtension = ({
         const position = state.doc.resolve(range.from);
         return this.editor.isEditable && position.parent.type.name === "paragraph";
       },
-      items: ({ query }) => filterSlashCommandItems(createSlashCommandItems(getLabels()), query),
+      items: ({ query }) => filterSlashCommandItems(createSlashCommandItems(getLabels(), { secretBlock: actions.canInsertSecretBlock?.() }), query),
       command: ({ editor, range, props }) => runSlashCommand({ actions, editor, item: props, range }),
       render: () => {
         let renderer: ReactRenderer<SlashCommandMenuHandle, SlashCommandMenuProps> | null = null;

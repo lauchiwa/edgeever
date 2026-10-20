@@ -65,6 +65,7 @@ export * from "./front-matter";
 
 export * from "./poster";
 export * from "./encrypted-note";
+export * from "./secret-block";
 
 export * from "./poster-fonts";
 export * from "./poster-platforms";

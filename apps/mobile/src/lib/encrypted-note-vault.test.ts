@@ -4,6 +4,7 @@ import {
   decryptNoteDoc,
   deriveEncryptedNoteKey,
   encryptNoteDoc,
+  encryptSecretBlockText,
   parseEncryptedNoteEnvelope,
   type TiptapDoc,
 } from "@edgeever/shared";
@@ -138,5 +139,22 @@ describe("mobile encrypted-note vault", () => {
     await new Promise((resolve) => setTimeout(resolve, 60));
     expect(vault.isUnlocked()).toBe(false);
     expect(vault.wasAutoLocked()).toBe(true);
+  });
+
+  // Fork: inline secret blocks share the passphrase but are bound to their own AAD.
+  test("opens a secret block sealed on web and keeps it apart from note envelopes", async () => {
+    const block = await encryptSecretBlockText("api key 4242", await deriveEncryptedNoteKey(PASSPHRASE, salt, ITERATIONS), { salt, iterations: ITERATIONS });
+    const vault = createEncryptedNoteVault(nodeProvider());
+    expect(await vault.decryptSecretBlock(block)).toBeNull();
+    await expect(vault.unlockSecretBlock(block, "wrong passphrase")).rejects.toBeInstanceOf(EncryptedNoteWrongPassphraseError);
+    expect(vault.isUnlocked()).toBe(false);
+
+    expect(await vault.unlockSecretBlock(block, PASSPHRASE)).toBe("api key 4242");
+    expect(await vault.decryptSecretBlock(block)).toBe("api key 4242");
+    // A note envelope never opens as a secret block, nor the other way round.
+    expect(await vault.decryptSecretBlock(await webEnvelope("note"))).toBeNull();
+    expect(await vault.decrypt(block)).toBeNull();
+    vault.lock();
+    expect(await vault.decryptSecretBlock(block)).toBeNull();
   });
 });

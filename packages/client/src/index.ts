@@ -7,7 +7,7 @@ import {
 } from "./ai-direct-stream";
 
 import { createPluginCapabilities } from './plugin-capabilities';
-import { aiDirectTargetKey } from "@edgeever/shared";
+import { aiDirectTargetKey, CLIENT_FEATURES_HEADER, downgradeSecretBlocksForStorage } from "@edgeever/shared";
 import type {
   CompanionMemory,
   CompanionDiscoverySettings,
@@ -122,6 +122,8 @@ export type EdgeEverClientOptions = {
   beforeRequest?: (context: EdgeEverClientRequestContext) => void | Promise<void>;
   shouldAttachToken?: (path: string) => boolean;
   onUnauthorized?: (context: EdgeEverClientRequestContext) => void | Promise<void>;
+  /** Fork: client features declared to the instance API; only send ones the server advertises (CORS). */
+  clientFeatures?: () => readonly string[];
 };
 
 export type MultipartResourceUploadSource = {
@@ -377,6 +379,10 @@ export type ApiResponseDiagnostics = {
 
 export type { SyncBootstrapResponse, SyncChangesResponse };
 
+// Fork: synced JSON keeps secret blocks as code blocks, even on servers that predate them.
+const withStoredSecretBlocks = <T extends { contentJson?: TiptapDoc }>(payload: T): T =>
+  payload.contentJson ? { ...payload, contentJson: downgradeSecretBlocksForStorage(payload.contentJson) } : payload;
+
 export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
   const getFetch = () => options.fetch ?? globalThis.fetch;
   const corsCapability = new Map<string, boolean>();
@@ -413,6 +419,11 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
       && !headers.has("Content-Type")
     ) {
       headers.set("Content-Type", "application/json");
+    }
+
+    const clientFeatures = isAbsoluteHttpUrl(path) ? [] : options.clientFeatures?.() ?? [];
+    if (clientFeatures.length && !headers.has(CLIENT_FEATURES_HEADER)) {
+      headers.set(CLIENT_FEATURES_HEADER, clientFeatures.join(","));
     }
 
     const requestUrl = isAbsoluteHttpUrl(path) ? path : `${getBaseUrl()}${path}`;
@@ -1450,7 +1461,7 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
     }) =>
       request<MemoResponse>("/api/v1/memos", {
         method: "POST",
-        body: JSON.stringify(payload),
+        body: JSON.stringify(withStoredSecretBlocks(payload)),
       }),
 
     listTemplates: () => request<ListTemplatesResponse>("/api/v1/templates"),
@@ -1873,7 +1884,7 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
     ) =>
       request<MemoResponse>(`/api/v1/memos/${memoId}`, {
         method: "PATCH",
-        body: JSON.stringify(payload),
+        body: JSON.stringify(withStoredSecretBlocks(payload)),
       }),
 
     deleteMemo: (memoId: string, options?: { permanent?: boolean }) => {

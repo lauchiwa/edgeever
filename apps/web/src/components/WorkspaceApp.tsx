@@ -47,6 +47,7 @@ import { cn } from "@/lib/utils";
 import { isBrowserOffline, isBrowserOnline } from "@/lib/network-status";
 import { ENCRYPTED_NOTE_PLACEHOLDER_TEXT, encryptedNotePlaceholderDoc, hasEncryptedNoteMarker } from "@edgeever/shared";
 import { encryptWithEncryptedNoteVault, isEncryptedNoteVaultUnlocked } from "@/lib/encrypted-note-vault";
+import { setSecretBlocksVaultScope } from "@/lib/secret-blocks";
 import { EncryptedNoteCreateDialog } from "./EncryptedNoteCreateDialog";
 import { createDefaultDiagramDocument, createDefaultInfographicDocument, hasPosterDocumentMarker, posterFallbackMarkdown, serializePosterDocument, createDefaultTableDocument, diagramFallbackMarkdown, getNotebookScopeIds, hasTableDocumentMarker, infographicFallbackMarkdown, markdownToDoc, parseDiagramDocument, parseInfographicDocument, parseTableDocument, serializeDiagramDocument, serializeInfographicDocument, serializeTableDocument, tableFallbackMarkdown, type NoteCreateKind, type Notebook, type AuthUser, type MemoSummary, type MemoDetail, type MemoTemplate as SavedMemoTemplate, getMemoDisplayTitle } from "@edgeever/shared";
 import { toggleMobileMemoSelection } from "@edgeever/shared/mobile-ui";
@@ -205,6 +206,7 @@ export const WorkspaceApp = ({
     () => createLocalDataScope(getPersistentDataScopeOrigin(window.location.origin), user?.id),
     [user?.id]
   );
+  setSecretBlocksVaultScope(localDataScope);
   const repository = useMemo(() => createRepository(localDataScope), [localDataScope]);
   const isInitialSettingsRoute = route.isSettings;
   const isInitialPluginsRoute = route.isPlugins;

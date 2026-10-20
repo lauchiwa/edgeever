@@ -27,6 +27,7 @@ import type {
 import { hashPassword, verifyPassword } from "./auth-crypto";
 import type { InstanceAuthMode } from "./auth-state";
 import { ENCRYPTED_NOTE_CAPABILITY } from "./encrypted-note-guard";
+import { SECRET_BLOCKS_CAPABILITY } from "./secret-block-guard";
 import { isoNow } from "./entity-utils";
 import {
   apiError,
@@ -38,7 +39,7 @@ import {
 import type { DatabaseAdapter } from "./storage-contract";
 
 // Advertised so fork clients can refuse features an upstream server cannot guard.
-const SERVER_FEATURES = { encryptedNotes: ENCRYPTED_NOTE_CAPABILITY };
+const SERVER_FEATURES = { encryptedNotes: ENCRYPTED_NOTE_CAPABILITY, secretBlocks: SECRET_BLOCKS_CAPABILITY };
 
 export type UserRow = {
   id: string;

@@ -20,6 +20,7 @@ import type { ListMemosInput, ListMemosResult } from "./memo-list-service";
 import { getActorLabel, getAuditActor, getWorkspaceId, requireScopes } from "./request-auth";
 import { deleteReleasedResourceObjects } from "./resource-service";
 import type { DatabaseAdapter } from "./storage-contract";
+import { readSecretBlocksClientFeature } from "./secret-block-guard";
 type MemoRouteDependencies = {
   clampNumber: (value: number, min: number, max: number) => number;
   createImageResource: (context: AppContext, input: {
@@ -114,7 +115,7 @@ type MemoRouteDependencies = {
     database: DatabaseAdapter,
     workspaceId: string,
     memoId: string,
-    input: MemoUpdateInput,
+    input: MemoUpdateInput & { secretBlocksAware?: boolean },
     actor: AuditActor,
     actorLabel: string,
     requireEditSession: boolean,
@@ -347,7 +348,7 @@ export const registerMemoRoutes = (
       context.env.storage.db,
       getWorkspaceId(context),
       memoId,
-      input,
+      { ...input, secretBlocksAware: readSecretBlocksClientFeature(context.req) },
       getAuditActor(context),
       getActorLabel(context),
       true,

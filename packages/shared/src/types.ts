@@ -315,7 +315,7 @@ export type AuthSession = {
   user: AuthUser | null;
   sessionToken?: string;
   /** Server-side capabilities; absent on upstream servers. */
-  features?: { encryptedNotes?: boolean };
+  features?: { encryptedNotes?: boolean; secretBlocks?: boolean };
 };
 
 export type LoginDeviceSession = {

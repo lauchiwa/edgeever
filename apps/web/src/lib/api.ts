@@ -6,6 +6,7 @@ import {
 import type { AuthSession } from "@edgeever/shared";
 import { normalizeInstanceUrl } from "@edgeever/shared";
 import { createClientUuid } from "./client-id";
+import { secretBlocksClientFeatures } from "./secret-blocks";
 
 export { ApiRequestError };
 export type {
@@ -330,6 +331,7 @@ const client = createEdgeEverClient({
   directAiGeneration: desktopAiDirectEnabled,
   tryDirectAiGeneration: !desktopAiDirectEnabled,
   providerFetch: desktopAiDirectEnabled ? desktopProviderFetch : undefined,
+  clientFeatures: secretBlocksClientFeatures,
 });
 
 export const api = {

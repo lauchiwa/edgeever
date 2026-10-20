@@ -35,6 +35,8 @@ import { safeDomCall } from "../lib/safe-dom-call";
 import { applyMobileEditorUpload, cancelMobileEditorUpload, flushMobileEditor } from "../lib/mobile-editor-controller";
 import { showEdgeEverKeyboard } from "../../modules/edgeever-keyboard";
 import { MobileResourceActions } from "../components/MobileResourceActions";
+import { MobileSecretBlockModal } from "../components/MobileSecretBlockModal";
+import { parseSecretBlockPressPayload } from "../lib/mobile-secret-blocks";
 import { MobileTemplatePickerModal } from "../components/MobileTemplatePicker";
 import { useMobileTheme } from "../lib/mobile-theme";
 import { createMemoSeedHasContent, type MobileCreateMemoSeed } from "../lib/mobile-templates";
@@ -1061,6 +1063,12 @@ export const RichEditorModal = ({
     token: session?.token,
   });
 
+  const [secretBlock, setSecretBlock] = useState<ReturnType<typeof parseSecretBlockPressPayload>>(null);
+  const closeSecretBlock = useCallback(() => setSecretBlock(null), []);
+  const onSecretBlockPress = useCallback(async (payloadJson: string) => {
+    setSecretBlock(parseSecretBlockPressPayload(payloadJson));
+  }, []);
+
   const editorElement = useMemo(
     () => memo && baseUrl ? (
       <LocalTiptapEditor
@@ -1080,6 +1088,7 @@ export const RichEditorModal = ({
         onAiCancel={cancelSelectionAi}
         onAiRequest={requestSelectionAi}
         onResourcePress={selectResource}
+        onSecretBlockPress={onSecretBlockPress}
         onLoadResource={loadEditorResource}
         onPickImage={pickAndUploadImage}
         onReady={async (elapsedMs) => {
@@ -1104,7 +1113,7 @@ export const RichEditorModal = ({
         theme={resolvedTheme}
       />
     ) : null,
-    [aiPromptsJson, baseUrl, cancelSelectionAi, editorStartup.attempt, initialFocus, loadEditorResource, memo?.id, requestSelectionAi, resolvedLocale, resolvedTheme, selectResource]
+    [aiPromptsJson, baseUrl, cancelSelectionAi, editorStartup.attempt, initialFocus, loadEditorResource, memo?.id, onSecretBlockPress, requestSelectionAi, resolvedLocale, resolvedTheme, selectResource]
   );
 
   useEffect(() => {
@@ -1250,6 +1259,7 @@ export const RichEditorModal = ({
           onSaveAs={saveResourceAs}
           target={resourceTarget}
         />
+        <MobileSecretBlockModal block={secretBlock} locale={resolvedLocale} onClose={closeSecretBlock} theme={resolvedTheme} />
         {uploadSourcePicker}
       </KeyboardAvoidingView>
     </SafeAreaView>

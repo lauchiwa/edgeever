@@ -172,6 +172,46 @@ describe("fork Android app", () => {
   });
 });
 
+describe("fork inline secret blocks", () => {
+  // Each hook keeps ciphertext stored as a code block, guarded on save, or
+  // out of shares, agents and AI. Losing one on an upstream sync leaks or drops secrets.
+  test("server guard and redaction stay wired in", () => {
+    expect(read("apps/api/src/memo-routes.ts")).toContain("secretBlocksAware: readSecretBlocksClientFeature(context.req)");
+    const service = read("apps/api/src/memo-service.ts");
+    expect(service).toContain("secretBlockUpdateError(");
+    expect(service).toContain("canonicalSecretBlockDoc(");
+    expect(read("apps/api/src/mcp-tool-service.ts")).toContain("redactSecretBlocksDeep(await callMcpToolUnredacted(");
+    for (const file of ["share-routes.ts", "notebook-share-routes.ts", "companion-prepare.ts", "companion-discovery.ts", "ai-routes.ts"]) {
+      expect(read(`apps/api/src/${file}`)).toMatch(/redactSecretBlock/);
+    }
+    expect(read("apps/api/src/auth-routes.ts")).toContain("secretBlocks: SECRET_BLOCKS_CAPABILITY");
+    expect(read("apps/api/src/index.ts")).toContain("CLIENT_FEATURES_HEADER");
+  });
+
+  test("clients store blocks as code blocks and keep them out of AI", () => {
+    expect(read("packages/shared/src/content.ts")).toContain("upgradeSecretBlockCodeFences(");
+    expect(read("packages/shared/src/document-extensions.ts")).toContain("SecretBlockCodeFence");
+    expect(read("packages/client/src/index.ts")).toContain("JSON.stringify(withStoredSecretBlocks(payload))");
+    expect(read("apps/web/src/lib/api.ts")).toContain("clientFeatures: secretBlocksClientFeatures");
+    const editor = read("apps/web/src/components/EditorPane.tsx");
+    expect(editor).toContain("secretBlock: SecretBlock,");
+    expect(editor).toContain("const getCurrentMarkdownForAi = useCallback(() => redactSecretBlocksInMarkdown(");
+    expect(editor).toContain("markdownHasSecretBlocks(pin.text)");
+  });
+
+  test("Android opens secret blocks read-only in a native modal", () => {
+    expect(read("apps/mobile/src/components/LocalTiptapEditor.tsx"))
+      .toContain("handleSecretBlockPress(view, event, onSecretBlockPressRef.current)");
+    expect(read("packages/shared/src/mobile-content-compatibility.ts"))
+      .toContain("secretBlockPlaceholderText((node as TiptapNode).attrs?.label)");
+    for (const screen of ["WorkspaceMemoDetail.tsx", "WorkspaceEditors.tsx"]) {
+      const source = read(`apps/mobile/src/screens/${screen}`);
+      expect(source).toContain("onSecretBlockPress={onSecretBlockPress}");
+      expect(source).toContain("<MobileSecretBlockModal ");
+    }
+  });
+});
+
 describe("fork fixes kept across upstream syncs", () => {
   test("Windows ACP fixes are still wired in", () => {
     for (const file of ["acp-process-lifecycle.mjs", "claude-acp-compat.mjs"]) {

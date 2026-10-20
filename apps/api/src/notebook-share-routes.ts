@@ -19,6 +19,7 @@ import type { AppEnv } from "./api-context";
 import { hashPassword, verifyPassword, randomToken } from "./auth-crypto";
 import { audit } from "./audit";
 import { isEncryptedNoteMarkdown } from "./encrypted-note-guard";
+import { redactSecretBlockDoc, redactSecretBlockMarkdown } from "./secret-block-guard";
 import { createId, isoNow, parseJsonArray } from "./entity-utils";
 import { apiError, notFound } from "./http-errors";
 import { getAuditActor, getWorkspaceId, requireUser } from "./request-auth";
@@ -301,8 +302,8 @@ export const registerPublicNotebookShareRoutes = (app: Hono<AppEnv>) => {
     const account = accountNoteProseFromRow(row);
     const share: PublicMemoShare = {
       title: row.title,
-      contentJson,
-      contentMarkdown: row.content_markdown,
+      contentJson: redactSecretBlockDoc(contentJson),
+      contentMarkdown: redactSecretBlockMarkdown(row.content_markdown),
       tags: parseJsonArray(row.tags_json),
       updatedAt: row.updated_at,
       memoShareTokens: {},

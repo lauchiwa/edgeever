@@ -17,6 +17,12 @@ import { NEW_IMAGE_WIDTH_PERCENT, parseImageWidth } from "./image-display";
 import { IMAGE_GALLERY_NODE_TYPE, groupConsecutiveImagesIntoGalleries, normalizeImageGalleries } from "./image-gallery";
 import { EMPTY_EXTERNAL_LINK_NODE_TYPE } from "./empty-external-link";
 import { FRONT_MATTER_LANGUAGE, createFrontMatterNode, getFrontMatterSource, splitMarkdownFrontMatter } from "./front-matter";
+import {
+  SECRET_BLOCK_NODE_TYPE,
+  getSecretBlockNodeLabel,
+  secretBlockPlaceholderText,
+  upgradeSecretBlockCodeFences,
+} from "./secret-block";
 
 export { PluginEmbed, PLUGIN_EMBED_NODE_TYPE, pluginEmbedToMarkdown, normalizePluginEmbedAttributes } from "./plugin-embed";
 export type { PluginEmbedAttributes } from "./plugin-embed";
@@ -197,9 +203,9 @@ export const resolveMemoContentDoc = (
   contentMarkdown: string | null | undefined
 ): TiptapDoc => {
   const currentDoc = contentJson && Array.isArray(contentJson.content)
-    ? upgradeMathCodeFences(normalizeImageGalleries(
+    ? upgradeSecretBlockCodeFences(upgradeMathCodeFences(normalizeImageGalleries(
         upgradeStandaloneFileLinks(upgradeStandalonePdfLinks(upgradeLegacyAttachmentLinks(contentJson))),
-      ))
+      )))
     : emptyDoc();
   if (getFrontMatterSource(currentDoc) !== null) return currentDoc;
   if (
@@ -216,6 +222,7 @@ export const resolveMemoContentDoc = (
     || docContainsNodeType(currentDoc, FILE_ATTACHMENT_NODE_TYPE)
     || docContainsNodeType(currentDoc, EMPTY_EXTERNAL_LINK_NODE_TYPE)
     || docContainsNodeType(currentDoc, "details")
+    || docContainsNodeType(currentDoc, SECRET_BLOCK_NODE_TYPE)
   ) {
     return currentDoc;
   }
@@ -237,6 +244,7 @@ export const resolveMemoContentDoc = (
     || docContainsNodeType(markdownDoc, INLINE_MATH_NODE_TYPE)
     || docContainsNodeType(markdownDoc, EMPTY_EXTERNAL_LINK_NODE_TYPE)
     || docContainsNodeType(markdownDoc, "details")
+    || docContainsNodeType(markdownDoc, SECRET_BLOCK_NODE_TYPE)
     || !docToText(currentDoc)
     ? markdownDoc
     : currentDoc;
@@ -293,6 +301,12 @@ export const docToText = (doc: unknown): string => {
     const current = node as { type?: unknown; text?: unknown; attrs?: Record<string, unknown>; content?: unknown };
 
     if (current.type === "codeBlock" && current.attrs?.language === FRONT_MATTER_LANGUAGE) return;
+
+    const secretLabel = getSecretBlockNodeLabel(current);
+    if (secretLabel !== null) {
+      pieces.push(secretBlockPlaceholderText(secretLabel));
+      return;
+    }
 
     if (typeof current.text === "string") {
       pieces.push(current.text);
@@ -362,6 +376,12 @@ export const countMemoCharacters = (doc: unknown): number => {
     const current = node as { type?: unknown; text?: unknown; attrs?: Record<string, unknown>; content?: unknown };
 
     if (current.type === "codeBlock" && current.attrs?.language === FRONT_MATTER_LANGUAGE) return;
+
+    const secretLabel = getSecretBlockNodeLabel(current);
+    if (secretLabel !== null) {
+      pieces.push(secretLabel);
+      return;
+    }
 
     if (typeof current.text === "string") {
       pieces.push(current.text);
