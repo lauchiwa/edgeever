@@ -14,6 +14,7 @@ import { EmptyExternalLink } from "./empty-external-link";
 import { EdgeEverLink } from "./editor-link";
 import { createEdgeEverTaskItem } from "./task-item-input";
 import { MathCodeFence } from "./mathematics-markdown";
+import { SecretBlock, SecretBlockCodeFence } from "./secret-block";
 
 export type CreateEdgeEverDocumentExtensionsOptions = {
   mathematics: AnyExtension[];
@@ -23,6 +24,8 @@ export type CreateEdgeEverDocumentExtensionsOptions = {
   pdf?: AnyExtension | false;
   file?: AnyExtension | false;
   pluginEmbed?: AnyExtension | false;
+  /** Editors pass a NodeView variant of `SecretBlock`; the schema must stay the same. */
+  secretBlock?: AnyExtension;
   table?: Parameters<typeof TableKit.configure>[0];
   markdown?: boolean;
 };
@@ -57,6 +60,8 @@ export const createEdgeEverDocumentExtensions = (
   ...withOptional(options.pluginEmbed, PluginEmbed),
   ...options.mathematics,
   MathCodeFence,
+  options.secretBlock ?? SecretBlock,
+  SecretBlockCodeFence,
   ...(options.markdown
     ? [Markdown.configure({ markedOptions: { gfm: true } })]
     : []),

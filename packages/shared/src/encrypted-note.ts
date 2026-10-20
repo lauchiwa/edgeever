@@ -14,7 +14,6 @@ import type { TiptapDoc } from "./content";
 const MARKER = "edgeever-encrypted-v1";
 const MARKER_PATTERN = /<!--\s*edgeever-encrypted-v1:([A-Za-z0-9_-]+)\s*-->/;
 const MAX_ENVELOPE_LENGTH = 8_000_000;
-const AAD = new TextEncoder().encode(MARKER);
 
 export const ENCRYPTED_NOTE_PLACEHOLDER_TEXT = "🔒 Encrypted note";
 export const ENCRYPTED_NOTE_PBKDF2_ITERATIONS = 600_000;
@@ -110,16 +109,22 @@ export const deriveEncryptedNoteKey = async (
   );
 };
 
-export const encryptNoteDoc = async (
-  doc: TiptapDoc,
+/**
+ * AES-GCM over a UTF-8 payload with a fresh IV. `aad` separates the formats
+ * that share this envelope (whole notes, inline secret blocks) so one can
+ * never be decrypted as the other.
+ */
+export const sealEnvelopePayload = async (
+  payloadJson: string,
   key: CryptoKey,
   kdf: { salt: string; iterations: number },
+  aad: string,
 ): Promise<EncryptedNoteEnvelope> => {
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const ciphertext = await subtle().encrypt(
-    { name: "AES-GCM", iv, additionalData: AAD },
+    { name: "AES-GCM", iv, additionalData: new TextEncoder().encode(aad) },
     key,
-    new TextEncoder().encode(encryptedNotePayloadJson(doc)),
+    new TextEncoder().encode(payloadJson),
   );
   return {
     v: 1,
@@ -129,12 +134,22 @@ export const encryptNoteDoc = async (
   };
 };
 
-/** Throws when the key is wrong or the envelope was tampered with (AES-GCM auth tag). */
-export const decryptNoteDoc = async (envelope: EncryptedNoteEnvelope, key: CryptoKey): Promise<TiptapDoc> => {
+/** Throws when the key or `aad` is wrong, or the envelope was tampered with (AES-GCM auth tag). */
+export const openEnvelopePayload = async (envelope: EncryptedNoteEnvelope, key: CryptoKey, aad: string) => {
   const plaintext = await subtle().decrypt(
-    { name: "AES-GCM", iv: toBytes(envelope.cipher.iv), additionalData: AAD },
+    { name: "AES-GCM", iv: toBytes(envelope.cipher.iv), additionalData: new TextEncoder().encode(aad) },
     key,
     toBytes(envelope.ct),
   );
-  return parseEncryptedNotePayloadJson(new TextDecoder().decode(plaintext));
+  return new TextDecoder().decode(plaintext);
 };
+
+export const encryptNoteDoc = (
+  doc: TiptapDoc,
+  key: CryptoKey,
+  kdf: { salt: string; iterations: number },
+): Promise<EncryptedNoteEnvelope> => sealEnvelopePayload(encryptedNotePayloadJson(doc), key, kdf, ENCRYPTED_NOTE_AAD);
+
+/** Throws when the key is wrong or the envelope was tampered with (AES-GCM auth tag). */
+export const decryptNoteDoc = async (envelope: EncryptedNoteEnvelope, key: CryptoKey): Promise<TiptapDoc> =>
+  parseEncryptedNotePayloadJson(await openEnvelopePayload(envelope, key, ENCRYPTED_NOTE_AAD));

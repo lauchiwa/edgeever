@@ -4,6 +4,7 @@ import { FILE_ATTACHMENT_NODE_TYPE } from "./file-attachment";
 import { PDF_ATTACHMENT_NODE_TYPE } from "./pdf-attachment";
 import { PLUGIN_EMBED_NODE_TYPE } from "./plugin-embed";
 import { EMPTY_EXTERNAL_LINK_NODE_TYPE } from "./empty-external-link";
+import { SECRET_BLOCK_NODE_TYPE } from "./secret-block";
 
 export const UNSUPPORTED_BLOCK_NODE_TYPE = "edgeeverUnsupportedBlock" as const;
 export const UNSUPPORTED_INLINE_NODE_TYPE = "edgeeverUnsupportedInline" as const;
@@ -61,6 +62,7 @@ const MARKDOWN_EDITOR_NODE_TYPES = new Set<string>([
   FILE_ATTACHMENT_NODE_TYPE,
   PDF_ATTACHMENT_NODE_TYPE,
   PLUGIN_EMBED_NODE_TYPE,
+  SECRET_BLOCK_NODE_TYPE,
 ]);
 
 const INLINE_PARENT_TYPES = new Set<string>(["paragraph", "heading"]);
