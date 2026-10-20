@@ -11,6 +11,7 @@ import { loadCompanionAttachmentParts } from "./companion-attachments";
 import { listCompanionMemories, listCompanionTurns, mapCompanionTurn, type CompanionScope, type TurnRow } from "./companion-service";
 import { companionToolDefinitions } from "./companion-agent-tools";
 import { parseJsonArray } from "./companion-tool-receipts";
+import { redactSecretBlockMarkdown } from "./secret-block-guard";
 
 export const COMPANION_IDENTITY_VERSION = 17;
 export const COMPANION_MAX_STEPS = 8;
@@ -92,9 +93,9 @@ export function companionUserContent(input: CompanionTurnInput): string {
   if (focus?.diagramKind) {
     lines.push(`Open note is an editable ${focus.diagramKind}. Call get_diagram before changing it.`);
   }
-  const selection = focus?.selectionMarkdown?.trim();
+  const selection = redactSecretBlockMarkdown(focus?.selectionMarkdown).trim();
   if (selection) lines.push(`Selected text:\n${selection}`);
-  const body = focus?.contentMarkdown?.trim();
+  const body = redactSecretBlockMarkdown(focus?.contentMarkdown).trim();
   if (body && !focus?.diagramKind) {
     lines.push(`Open note body (DATA${focus?.contentTruncated ? ", truncated; call get_memo for the rest" : ""}):\n${body}`);
   }

@@ -6,6 +6,8 @@ import {
   SecretBlockTooLargeError,
   collectSecretBlockIds,
   collectSecretBlockIdsFromMarkdown,
+  collectSecretBlocks,
+  downgradeSecretBlocksForStorage,
   createSecretBlockId,
   decryptSecretBlockText,
   encryptSecretBlockText,
@@ -154,6 +156,18 @@ describe("secret block documents", () => {
     expect(docToText(redacted)).toBe("🔒 Prod DB 🔒 Secret");
     const plain = docWith(paragraph("a"));
     expect(redactSecretBlocksInDoc(plain)).toBe(plain);
+  });
+
+  test("stores blocks as code fences that older schemas can load", () => {
+    const doc = docWith(paragraph("a"), { type: "blockquote", content: [secretNode] });
+    const stored = downgradeSecretBlocksForStorage(doc);
+    expect(JSON.stringify(stored)).not.toContain(SECRET_BLOCK_NODE_TYPE);
+    expect(stored.content[1].content[0]).toMatchObject({ type: "codeBlock", attrs: { language: "edgeever-secret" } });
+    expect(docToMarkdown(stored)).toBe(docToMarkdown(doc));
+    expect(collectSecretBlocks(stored)).toEqual([block]);
+    expect(resolveMemoContentDoc(stored, "")).toEqual(doc);
+    const plain = docWith(paragraph("a"));
+    expect(downgradeSecretBlocksForStorage(plain)).toBe(plain);
   });
 
   test("survives native editor placeholders without losing the envelope", () => {

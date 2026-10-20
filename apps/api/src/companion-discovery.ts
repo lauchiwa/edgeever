@@ -12,6 +12,7 @@ import { getCompanionAction } from "./companion-actions";
 import type { loadDefaultAiModel } from "./ai-service";
 import type { generateCompanionDiscovery } from "./companion-discovery-runtime";
 import { discoveryContext, discoveryInputHash, type DiscoveryContextInput } from "./companion-discovery-context";
+import { redactSecretBlockMarkdown } from "./secret-block-guard";
 
 type SettingsRow = { learning_enabled: number; recall_enabled: number; last_memory_revision: number; enabled: number; version: number; last_cursor: number;
   last_check_at: string | null; last_status: CompanionDiscoverySettings["lastStatus"]; active_turn_id: string | null; last_input_hash: string | null };
@@ -212,7 +213,7 @@ export async function startDiscoveryCheck(db: DatabaseAdapter, scope: CompanionS
       .bind(scope.workspaceId).all<{ id: string; name: string }>()).results;
     const generationInput = {
       memories, notebooks,
-      candidates: candidates.map(note => ({ id: note.id, title: note.title, contentMarkdown: note.contentMarkdown, updatedAt: note.updatedAt, notebookId: note.notebookId, tags: note.tags, plainText: plainText(note.contentJson) })),
+      candidates: candidates.map(note => ({ id: note.id, title: note.title, contentMarkdown: redactSecretBlockMarkdown(note.contentMarkdown), updatedAt: note.updatedAt, notebookId: note.notebookId, tags: note.tags, plainText: plainText(note.contentJson) })),
       anchorId: candidates[0].id, locale: options.locale,
     };
     const contextRevision = await companionRevision(db, scope);

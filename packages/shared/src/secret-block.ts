@@ -19,8 +19,10 @@ import {
  * same AES-GCM envelope as encrypted notes, sealed with its own AAD. In
  * Markdown it is a fenced code block (`edgeever-secret`) carrying one JSON
  * line, so a client or tool that does not know the format still keeps it as
- * an opaque code block instead of dropping it. The plaintext never enters the
- * document: editors decrypt into component state only.
+ * an opaque code block instead of dropping it. Stored JSON uses that same code
+ * block form (see `downgradeSecretBlocksForStorage`); only editors that render
+ * the block upgrade it to the node. The plaintext never enters the document:
+ * editors decrypt into component state only.
  *
  * Only the secret text is confidential and authenticated. The label and the
  * surrounding note are plaintext, and the block id is not bound to the
@@ -261,10 +263,26 @@ export const findSecretBlockKdf = (doc: TiptapDoc | null | undefined) => {
   return kdf ? { salt: kdf.salt, iterations: kdf.iterations } : null;
 };
 
-/** Turns `edgeever-secret` code blocks kept by older editors back into secret blocks. */
+/** Turns stored `edgeever-secret` code blocks into secret blocks for editors that render them. */
 export const upgradeSecretBlockCodeFences = (doc: TiptapDoc): TiptapDoc =>
   mapSecretNodes(doc, (node, attrs) => (
     node.type === SECRET_BLOCK_NODE_TYPE ? node : { type: SECRET_BLOCK_NODE_TYPE, attrs }
+  ));
+
+/**
+ * Stored and synced JSON keeps secret blocks as plain `edgeever-secret` code
+ * blocks. A client without the node in its schema would otherwise fail to load
+ * the whole document, and autosave could then persist an empty note.
+ */
+export const downgradeSecretBlocksForStorage = (doc: TiptapDoc): TiptapDoc =>
+  mapSecretNodes(doc, (node, { id, label, envelope }) => (
+    node.type === SECRET_BLOCK_NODE_TYPE
+      ? {
+          type: "codeBlock",
+          attrs: { language: SECRET_BLOCK_MARKDOWN_LANGUAGE },
+          content: [{ type: "text", text: JSON.stringify({ id, label, envelope }) }],
+        }
+      : node
   ));
 
 /** Replaces each secret block with its label, for readers that must never get the ciphertext. */
@@ -320,10 +338,13 @@ const scanSecretFences = (markdown: string) => {
 export const markdownHasSecretBlocks = (markdown: string | null | undefined) =>
   Boolean(markdown?.includes(SECRET_BLOCK_MARKDOWN_LANGUAGE)) && scanSecretFences(markdown ?? "").fences.length > 0;
 
-export const collectSecretBlockIdsFromMarkdown = (markdown: string | null | undefined) =>
+export const collectSecretBlocksFromMarkdown = (markdown: string | null | undefined) =>
   markdown?.includes(SECRET_BLOCK_MARKDOWN_LANGUAGE)
-    ? scanSecretFences(markdown).fences.map((fence) => fence.attributes.id)
+    ? scanSecretFences(markdown).fences.map((fence) => fence.attributes)
     : [];
+
+export const collectSecretBlockIdsFromMarkdown = (markdown: string | null | undefined) =>
+  collectSecretBlocksFromMarkdown(markdown).map((block) => block.id);
 
 /** Replaces each secret fence with its label line, keeping list and quote prefixes. */
 export const redactSecretBlocksInMarkdown = (markdown: string) => {

@@ -6,6 +6,7 @@ import { audit } from "./audit";
 import { hashPassword, randomToken, verifyPassword } from "./auth-crypto";
 import { parseByteRange, rangeNotSatisfiable } from "./byte-range";
 import { isEncryptedNoteMarkdown } from "./encrypted-note-guard";
+import { redactSecretBlockDoc, redactSecretBlockMarkdown } from "./secret-block-guard";
 import { createId, isoNow, parseJsonArray } from "./entity-utils";
 import { apiError, notFound } from "./http-errors";
 import { resolveObjectStorage } from "./object-storage";
@@ -205,8 +206,8 @@ export const registerPublicShareRoutes = (app: Hono<AppEnv>) => {
 
     const share: PublicMemoShare = {
       title: row.title,
-      contentJson,
-      contentMarkdown: row.content_markdown,
+      contentJson: redactSecretBlockDoc(contentJson),
+      contentMarkdown: redactSecretBlockMarkdown(row.content_markdown),
       tags: parseJsonArray(row.tags_json),
       updatedAt: row.updated_at,
       memoShareTokens,

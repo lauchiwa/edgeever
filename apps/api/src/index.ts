@@ -1,4 +1,5 @@
 import {
+  CLIENT_FEATURES_HEADER,
   createExcerpt,
   docToText,
   markdownToDoc,
@@ -160,7 +161,7 @@ app.use(
   "/api/*",
   cors({
     origin: API_CORS_ORIGINS,
-    allowHeaders: ["Content-Type", "Authorization"],
+    allowHeaders: ["Content-Type", "Authorization", CLIENT_FEATURES_HEADER],
     allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     credentials: true,
   })

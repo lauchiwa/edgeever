@@ -26,6 +26,7 @@ import { auditStatement } from "./audit";
 import type { AppContext, AuditActor, AuthContext, Bindings } from "./api-context";
 import { AppError } from "./app-error";
 import { assertNotEncryptedNote, encryptedNoteUpdateError, redactEncryptedMemo, resolveEncryptedNoteContent } from "./encrypted-note-guard";
+import { canonicalSecretBlockDoc, secretBlockUpdateError } from "./secret-block-guard";
 import { clampNumber, createId, isoNow, parseJsonArray } from "./entity-utils";
 import { workspaceInboxId } from "./notebook-service";
 import { sha256 } from "./hash-utils";
@@ -879,7 +880,7 @@ export const mergeMemosRecord = async (
     }
     return doc;
   });
-  const contentJson = mergeMemoDocs(sourceDocs);
+  const contentJson = canonicalSecretBlockDoc(mergeMemoDocs(sourceDocs));
   const mergedMarkdown = docToMarkdown(contentJson);
   const contentText = docToText(contentJson);
   const tags = Array.from(new Set(ordered.flatMap((memo) => parseJsonArray(memo.tags_json))));
@@ -972,9 +973,11 @@ export const createMemoRecord = async (
     throw new AppError(encryptedContent.error, encryptedContent.message, encryptedContent.status);
   }
   const contentJson = encryptedContent?.contentJson
-    ?? (input.contentJson && typeof input.contentJson === "object"
+    ?? canonicalSecretBlockDoc(input.contentJson && typeof input.contentJson === "object"
       ? input.contentJson as TiptapDoc
       : markdownToDoc(contentMarkdown));
+  const secretBlockError = secretBlockUpdateError({ contentJson: null, contentMarkdown: null }, { contentJson, contentMarkdown }, true);
+  if (secretBlockError) throw new AppError(secretBlockError.error, secretBlockError.message, secretBlockError.status);
   const contentText = docToText(contentJson);
   const title = normalizeMemoTitle(input.title);
   const excerpt = createExcerpt(contentText);
@@ -1209,7 +1212,8 @@ export const updateMemoRecord = async (
   db: DatabaseAdapter,
   workspaceId: string,
   id: string,
-  input: MemoUpdateInput,
+  // secretBlocksAware: set by routes from the client features header, never from the body.
+  input: MemoUpdateInput & { secretBlocksAware?: boolean },
   actor: { actorType: "user" | "agent"; actorId: string | null },
   actorLabel: string,
   requireEditSession = false,
@@ -1353,7 +1357,16 @@ export const updateMemoRecord = async (
   if (encryptedUpdateError) return encryptedUpdateError;
   const encryptedContent = hasDocumentUpdate ? resolveEncryptedNoteContent(contentMarkdown) : null;
   if (encryptedContent?.error) return encryptedContent;
-  const contentJson = encryptedContent?.contentJson ?? requestedContentJson;
+  const contentJson = encryptedContent?.contentJson
+    ?? (hasDocumentUpdate ? canonicalSecretBlockDoc(requestedContentJson as TiptapDoc) : requestedContentJson);
+  const secretBlockError = hasDocumentUpdate
+    ? secretBlockUpdateError(
+        { contentJson: currentContentJson, contentMarkdown: current.content_markdown },
+        { contentJson: contentJson as TiptapDoc, contentMarkdown },
+        input.secretBlocksAware === true,
+      )
+    : null;
+  if (secretBlockError) return secretBlockError;
   const contentText = hasDocumentUpdate ? docToText(contentJson) : current.content_text;
   const title =
     input.title !== undefined ? normalizeMemoTitle(input.title) : normalizeMemoTitle(current.title);

@@ -69,6 +69,7 @@ import {
 import { encryptSecret } from "./secret-encryption";
 import { listTagSummaries } from "./tag-service";
 import { prepareNoteResourceTranscription } from "./resource-transcription";
+import { redactSecretBlockMarkdown } from "./secret-block-guard";
 
 type AiRouteDependencies = {
   isDemoMode: (environment: Bindings) => boolean;
@@ -234,7 +235,7 @@ const resolveAiGenerateFields = async (context: AppContext, input: {
     instruction,
     targetLanguage: needsTargetLanguage ? input.targetLanguage : undefined,
     tone: needsTone ? input.tone : undefined,
-    contentMarkdown: input.contentMarkdown,
+    contentMarkdown: redactSecretBlockMarkdown(input.contentMarkdown),
     attachments: input.attachments,
   };
 };
@@ -926,6 +927,7 @@ export const registerAiRoutes = (app: Hono<AppEnv>, dependencies: AiRouteDepende
         );
         const fields = buildAiTagSuggestionRequest({
           ...input,
+          contentMarkdown: redactSecretBlockMarkdown(input.contentMarkdown),
           existingTags,
           instruction: getDefaultAiTagSuggestionPrompt(input.locale),
         });
@@ -964,9 +966,10 @@ export const registerAiRoutes = (app: Hono<AppEnv>, dependencies: AiRouteDepende
         ]));
         const canonicalTags = Object.fromEntries(allCanonicalTags);
         const rawSuggestions = dependencies.suggestTags
-          ? await dependencies.suggestTags({ ...input, existingTags })
+          ? await dependencies.suggestTags({ ...input, contentMarkdown: redactSecretBlockMarkdown(input.contentMarkdown), existingTags })
           : await generateAiTagSuggestions({
             ...input,
+            contentMarkdown: redactSecretBlockMarkdown(input.contentMarkdown),
             existingTags,
             instruction: getDefaultAiTagSuggestionPrompt(input.locale),
             model: await loadDefaultAiModel(context.env.storage.db, workspaceId, context.env),
