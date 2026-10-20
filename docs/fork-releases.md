@@ -139,6 +139,30 @@ passphrases). It can be done on a Mac or on Windows:
 5. Move `macos-signing-rsa-backup.pem` to offline storage, and keep both
    passphrases in a password manager.
 
+## Local checks
+
+`fork-ci.yml` runs every gate from scratch on each pull request, and that run
+is what must pass. Locally, check only what a change can affect:
+
+- Docs only: nothing; the pull request's CI covers it.
+- Fork scripts or workflows: the affected test files, for example
+  `bun test scripts/fork-workflows.test.mjs`.
+- Application code:
+
+  ```sh
+  node scripts/fork-check.mjs          # fork tests + both typechecks
+  node scripts/fork-check.mjs --full   # also build:web
+  ```
+
+  The typechecks are the repository's own `bun run typecheck` and
+  `bun run typecheck:mobile` with `--incremental`; TypeScript keeps its state
+  in `node_modules/.cache/edgeever-fork`, so a later run rechecks only what
+  changed. The first run takes as long as a full one. If the results ever look
+  stale, delete that directory.
+
+`fork-check.mjs` and the `checks` job of `fork-ci.yml` list the same fork
+tests; `scripts/fork-check.test.mjs` fails if they drift apart.
+
 ## Syncing an upstream release
 
 Only formal upstream releases are followed, never upstream `main`.
