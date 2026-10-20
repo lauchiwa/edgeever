@@ -88,6 +88,23 @@ vX.Y.Z-rc.N
 
 5. 把 `macos-signing-rsa-backup.pem` 移到离线存储，两个口令保存在密码管理器中。
 
+## 本地检查
+
+`fork-ci.yml` 会在每个 PR 上从零运行全部检查，必须通过的是这次运行。本地只检查改动可能影响的部分：
+
+- 仅修改文档：本地无需检查，由 PR 的 CI 覆盖。
+- 修改二开脚本或工作流：只运行受影响的测试文件，例如 `bun test scripts/fork-workflows.test.mjs`。
+- 修改应用代码：
+
+  ```sh
+  node scripts/fork-check.mjs          # 二开测试 + 两项类型检查
+  node scripts/fork-check.mjs --full   # 另外运行 build:web
+  ```
+
+  其中的类型检查就是仓库原有的 `bun run typecheck` 和 `bun run typecheck:mobile`，只是加了 `--incremental`。TypeScript 把增量状态保存在 `node_modules/.cache/edgeever-fork`，之后只重新检查有变化的部分。第一次运行与全量检查一样耗时。如果结果看起来不对，删除该目录即可。
+
+`fork-check.mjs` 与 `fork-ci.yml` 的 `checks` 任务列出的二开测试相同；两者不一致时 `scripts/fork-check.test.mjs` 会失败。
+
 ## 同步上游版本
 
 只跟随上游**正式 Release**，不跟随上游 `main`。`main` 受保护（只能通过 PR 合入，禁止强制推送和删除）。上游的 `sync-edgeever-upstream.yml` 已在本仓库设置中停用，因为它会把 `main` 重置为上游快照。

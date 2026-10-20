@@ -45,7 +45,8 @@ jobs:
           scripts/fork-sign-release.test.mjs scripts/fork-generate-update-keys.test.mjs
           scripts/fork-workflows.test.mjs scripts/windows-update-metadata.test.mjs
           scripts/fork-linux-release.test.mjs scripts/fork-macos-release.test.mjs
-          scripts/fork-generate-macos-signing-certificates.test.mjs apps/desktop/src/main/windows-update-trust.test.mjs
+          scripts/fork-generate-macos-signing-certificates.test.mjs scripts/fork-check.test.mjs
+          apps/desktop/src/main/windows-update-trust.test.mjs
       - run: bun run typecheck
       - run: bun run typecheck:mobile
       - run: bun run build:web

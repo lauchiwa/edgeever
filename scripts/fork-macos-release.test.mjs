@@ -77,6 +77,7 @@ describe("fork macOS signing plan", () => {
     writeFileSync(path, content);
   };
 
+  // Creating the junction below occasionally stalls for seconds on Windows.
   test("signs nested code deepest first and the app last, skipping links and main executables", () => {
     const app = join(root, "EdgeEver.app");
     write(join(app, "Contents", "Info.plist"), plist("EdgeEver"));
@@ -104,7 +105,7 @@ describe("fork macOS signing plan", () => {
       ["Contents/PlugIns/EdgeEverShare.appex", "extension"],
       ["", "app"],
     ]);
-  });
+  }, 30_000);
 
   test("refuses anything but an app bundle", () => {
     expect(() => macSigningPlan(join(root, "missing.app"))).toThrow("Not an app bundle");

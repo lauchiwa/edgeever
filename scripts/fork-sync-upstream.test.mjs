@@ -1,14 +1,16 @@
 import { execFileSync } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { gitRunner, startSync, syncStatus } from "./fork-sync-upstream.mjs";
 
-// Each test spawns ~30 git processes; on Windows that exceeds the 5 s default.
+// Building the repositories spawns ~20 git processes per variant and each test
+// another ~10; on Windows that can exceed the 5 s default.
 const GIT_TIMEOUT = 60_000;
 
 const identity = { GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@example.invalid", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@example.invalid" };
+let templates;
 let root;
 let saved;
 
@@ -26,7 +28,7 @@ const commitFile = async (cwd, file, content, message) => {
 };
 
 // upstream: v1.0.0 -> v1.1.0. origin (fork): v1.0.0 + a fork commit on main. local: clone of origin.
-const setup = async ({ conflicting }) => {
+const build = async (root, { conflicting }) => {
   const upstream = join(root, "upstream");
   sh(root, "init", "-q", "-b", "main", upstream);
   await commitFile(upstream, "app.txt", "upstream line\n", "base");
@@ -45,8 +47,27 @@ const setup = async ({ conflicting }) => {
   if (conflicting) await commitFile(upstream, "config.txt", "repo=tianma-if\nchannel=latest\n", "upstream changes config");
   else await commitFile(upstream, "app.txt", "upstream line\nnew feature\n", "upstream feature");
   sh(upstream, "tag", "v1.1.0");
+};
+
+// Each variant is built once; every test works on its own copy. The copied
+// clone still points at the template's origin, so repoint it.
+const setup = async ({ conflicting }) => {
+  await cp(join(templates, conflicting ? "conflicting" : "clean"), root, { recursive: true });
+  const upstream = join(root, "upstream");
+  const local = join(root, "local");
+  sh(local, "remote", "set-url", "origin", join(root, "origin.git"));
   return { upstream, local, git: gitRunner(local) };
 };
+
+beforeAll(async () => {
+  templates = await mkdtemp(join(tmpdir(), "edgeever-fork-sync-templates-"));
+  for (const variant of ["clean", "conflicting"]) {
+    const directory = join(templates, variant);
+    await mkdir(directory);
+    await build(directory, { conflicting: variant === "conflicting" });
+  }
+}, GIT_TIMEOUT);
+afterAll(() => rm(templates, { recursive: true, force: true }), GIT_TIMEOUT);
 
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), "edgeever-fork-sync-"));
