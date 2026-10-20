@@ -4,6 +4,7 @@ import { prepareNoteImageAssets } from "@edgeever/shared/note-image-fonts";
 import { noteImageAssetUrls } from "./note-image-asset-urls";
 import "katex/dist/katex.min.css";
 import { attachMobileReaderScroll } from "../lib/mobile-reader-scroll";
+import { handleSecretBlockPress } from "../lib/mobile-secret-blocks";
 import { Graph } from "@antv/x6";
 import Image from "@tiptap/extension-image";
 import CodeBlock from "@tiptap/extension-code-block";
@@ -162,6 +163,8 @@ type LocalTiptapEditorSharedProps = {
   visualDiagramNote?: boolean;
   onImagePreview?: (payloadJson: string) => Promise<void>;
   onDoublePress?: () => Promise<void>;
+  /** Fork: tapped secret block `{id,label,envelope}` (ciphertext only) for the native unlock modal. */
+  onSecretBlockPress?: (attributesJson: string) => Promise<void>;
 };
 
 type LocalTiptapEditorProps = LocalTiptapEditorSharedProps;
@@ -675,6 +678,8 @@ function LocalTiptapEditorImpl(props: LocalTiptapEditorProps) {
   const onSearchResultRef = useRef(props.onSearchResult ?? ignoreSearchResult);
   const onReaderScrollRef = useRef(props.onReaderScroll);
   const onImageExportEventRef = useRef(props.onImageExportEvent);
+  const onSecretBlockPressRef = useRef(props.onSecretBlockPress);
+  onSecretBlockPressRef.current = props.onSecretBlockPress;
   const searchStateRef = useRef({ activeIndex: -1, query: "" });
   const [aiPanel, setAiPanel] = useState<MobileAiPanelState | null>(null);
   const [aiSelectionTrigger, setAiSelectionTrigger] = useState<MobileAiSelectionTriggerPosition | null>(null);
@@ -805,10 +810,11 @@ function LocalTiptapEditorImpl(props: LocalTiptapEditorProps) {
       handleDOMEvents: {
         // Intercept attachment anchors before ProseMirror's later click phase so
         // the embedded file:// WebView never follows relative resource URLs.
-        click: (_view, event) => handleMobileResourceEvent(event, onResourcePressRef.current, {
-          allowImagePreview: isViewerRef.current,
-          onImagePreview: onImagePreviewRef.current,
-        }),
+        click: (view, event) => handleSecretBlockPress(view, event, onSecretBlockPressRef.current)
+          || handleMobileResourceEvent(event, onResourcePressRef.current, {
+            allowImagePreview: isViewerRef.current,
+            onImagePreview: onImagePreviewRef.current,
+          }),
         contextmenu: (_view, event) => handleMobileResourceEvent(event, onResourcePressRef.current, {
           allowImagePreview: false,
           onImagePreview: onImagePreviewRef.current,

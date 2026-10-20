@@ -24,6 +24,8 @@ import LocalTiptapEditor, { type LocalTiptapEditorRef } from "../components/Loca
 import { MobileAiAssistantModal } from "../components/MobileAiAssistantModal";
 import { MobileResourceActions } from "../components/MobileResourceActions";
 import { ZoomableImagePreview } from "../components/ZoomableImagePreview";
+import { MobileSecretBlockModal } from "../components/MobileSecretBlockModal";
+import { parseSecretBlockPressPayload } from "../lib/mobile-secret-blocks";
 import type { ImageSize } from "../lib/mobile-image-zoom";
 import { SAFE_DOM_WEBVIEW_PROPS } from "../lib/mobile-dom";
 import { getNextMobileNoteSearchIndex } from "../lib/mobile-note-search";
@@ -522,6 +524,11 @@ export const MemoDetailModal = ({
   const [bodySearchMatchCount, setBodySearchMatchCount] = useState(0);
   const [activeMatchIndex, setActiveMatchIndex] = useState(0);
   const [imagePreview, setImagePreview] = useState<{ alt: string; source: string } | null>(null);
+  const [secretBlock, setSecretBlock] = useState<ReturnType<typeof parseSecretBlockPressPayload>>(null);
+  const closeSecretBlock = useCallback(() => setSecretBlock(null), []);
+  const onSecretBlockPress = useCallback(async (payloadJson: string) => {
+    setSecretBlock(parseSecretBlockPressPayload(payloadJson));
+  }, []);
   const [resourceTarget, setResourceTarget] = useState<MobileResourceTarget | null>(null);
   const [viewerReady, setViewerReady] = useState(false);
   const [titleCollapsed, setTitleCollapsed] = useState(false);
@@ -1455,6 +1462,7 @@ export const MemoDetailModal = ({
                 onAiRequest={isEditing ? editor.requestSelectionAi : undefined}
                 onChange={isEditing ? editor.persistDraft : undefined}
                 onImagePreview={isEditing ? undefined : onImagePreview}
+                onSecretBlockPress={onSecretBlockPress}
                 onDoublePress={isEditing || locksRichTextEdit ? undefined : async () => {
                   beginEditorStartup();
                   onRichEdit(memo, "body");
@@ -1801,6 +1809,7 @@ export const MemoDetailModal = ({
             visible={aiAssistantOpen}
           />
         ) : null}
+        <MobileSecretBlockModal block={secretBlock} locale={resolvedLocale} onClose={closeSecretBlock} theme={resolvedTheme} />
         <Modal animationType="fade" onRequestClose={() => setImagePreview(null)} transparent visible={Boolean(imagePreview)}>
           <View style={resourceImageStyles.previewBackdrop}>
             {imagePreview ? (

@@ -35,6 +35,28 @@ The fork's Android test build ([fork releases](fork-releases.md#android-test-bui
 
 Upstream Android and iOS apps do not know this format. They show the placeholder text, and if a user edits it there, the save is rejected as a conflict by the fork server instead of overwriting the ciphertext. An **upstream** server image has no such guard, so do not use encrypted notes against it.
 
+## Inline secret blocks
+
+An ordinary note can encrypt just a small part of its content, such as the passwords in a deployment log. Type `/secret` in the editor (or search for "Secret block") to insert one. The label stays plaintext and only the secret is encrypted.
+
+- Encryption matches encrypted notes and uses the same vault passphrase. The additional authenticated data (AAD) is different, so a secret block cannot be opened as an encrypted note or the other way round.
+  - Blocks in one note share a salt, and every encryption uses a fresh IV. A block holds up to 32 KB, and a note holds up to 100 blocks.
+- A block is stored as an `edgeever-secret` code block holding one JSON line (`id`, `label` and the envelope). A client that does not know the format keeps it as an ordinary code block instead of dropping it or blanking the note.
+- The plaintext lives only in the block component's memory. It never enters the document, drafts, the offline queue or sync, and it is cleared as soon as the vault locks.
+- A block is re-encrypted only when you press "Done" after changing it.
+- Search, excerpts, shared pages, AI, Companion and MCP only see "🔒 label". An AI rewrite of a selection never replaces a selection that contains a secret block.
+
+Server guard:
+- A client that does not declare support (no `secret-blocks-v1` in the `X-EdgeEver-Client-Features` header) must keep every existing block unchanged in both JSON and Markdown, or the save gets 409 `secret_block_update_required`. It can still edit the text around a block and its label.
+- Going over the block limit gets 400 `secret_block_limit`.
+- The server announces `features.secretBlocks` in `/api/v1/auth/session`. Clients offer the insert command and send the header above only when the server announces it.
+
+Limits:
+- The label and the rest of the note are plaintext.
+- AI and MCP cannot rewrite a whole note that contains secret blocks (409), but they can still change its title and tags.
+- Restoring a revision skips this guard, but the current version is saved first, so it can still be recovered.
+- The fork Android test build shows a secret block as its label and opens it read-only. Tapping the block opens a native dialog: enter the vault passphrase (once per vault session), then view or copy the text. The plaintext stays in that dialog and is dropped when it closes, the vault locks or the app goes to the background; it never reaches the editor WebView, the note or local storage. Editing or adding secret blocks needs Web or desktop, and the server rejects a save that drops or changes one. This has not been verified on a real device yet.
+
 ## Verification status
 
 Automated tests cover:

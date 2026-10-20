@@ -2,6 +2,8 @@ import {
   ENCRYPTED_NOTE_AAD,
   encryptedNotePayloadJson,
   parseEncryptedNotePayloadJson,
+  parseSecretBlockPayloadJson,
+  SECRET_BLOCK_AAD,
   serializeEncryptedNoteEnvelope,
   type EncryptedNoteEnvelope,
   type TiptapDoc,
@@ -80,6 +82,45 @@ export const createEncryptedNoteVault = (
 
   const open = async (envelope: EncryptedNoteEnvelope, key: string) =>
     parseEncryptedNotePayloadJson(await provider.decrypt(key, envelope.cipher.iv, envelope.ct, ENCRYPTED_NOTE_AAD));
+  // Fork: inline secret blocks share the vault passphrase but use their own AAD/payload.
+  const openSecretBlock = async (envelope: EncryptedNoteEnvelope, key: string) =>
+    parseSecretBlockPayloadJson(await provider.decrypt(key, envelope.cipher.iv, envelope.ct, SECRET_BLOCK_AAD));
+
+  const unlockWith = async <T>(
+    envelope: EncryptedNoteEnvelope,
+    secret: string,
+    read: (envelope: EncryptedNoteEnvelope, key: string) => Promise<T>,
+  ) => {
+    const key = derive(secret, envelope.kdf.salt, envelope.kdf.iterations);
+    let value: T;
+    try {
+      value = await read(envelope, await key);
+    } catch {
+      throw new EncryptedNoteWrongPassphraseError();
+    }
+    if (secret !== passphrase) keyCache.clear();
+    passphrase = secret;
+    keyCache.set(`${envelope.kdf.salt}:${envelope.kdf.iterations}`, key);
+    lockedByTimeout = false;
+    touch();
+    notify();
+    return value;
+  };
+
+  const decryptWith = async <T>(
+    envelope: EncryptedNoteEnvelope,
+    read: (envelope: EncryptedNoteEnvelope, key: string) => Promise<T>,
+  ) => {
+    const secret = passphrase;
+    if (!secret) return null;
+    try {
+      const value = await read(envelope, await sessionKey(secret, envelope.kdf.salt, envelope.kdf.iterations));
+      touch();
+      return value;
+    } catch {
+      return null;
+    }
+  };
 
   return {
     isUnlocked: () => passphrase !== null,
@@ -102,35 +143,16 @@ export const createEncryptedNoteVault = (
     },
 
     /** Decrypts with a typed passphrase; on success it becomes the session passphrase. */
-    unlock: async (envelope: EncryptedNoteEnvelope, secret: string) => {
-      const key = derive(secret, envelope.kdf.salt, envelope.kdf.iterations);
-      let doc: TiptapDoc;
-      try {
-        doc = await open(envelope, await key);
-      } catch {
-        throw new EncryptedNoteWrongPassphraseError();
-      }
-      if (secret !== passphrase) keyCache.clear();
-      passphrase = secret;
-      keyCache.set(`${envelope.kdf.salt}:${envelope.kdf.iterations}`, key);
-      lockedByTimeout = false;
-      touch();
-      notify();
-      return doc;
-    },
+    unlock: (envelope: EncryptedNoteEnvelope, secret: string): Promise<TiptapDoc> => unlockWith(envelope, secret, open),
 
     /** Decrypts with the session passphrase. Null when locked or when the passphrase does not fit this note. */
-    decrypt: async (envelope: EncryptedNoteEnvelope) => {
-      const secret = passphrase;
-      if (!secret) return null;
-      try {
-        const doc = await open(envelope, await sessionKey(secret, envelope.kdf.salt, envelope.kdf.iterations));
-        touch();
-        return doc;
-      } catch {
-        return null;
-      }
-    },
+    decrypt: (envelope: EncryptedNoteEnvelope) => decryptWith(envelope, open),
+
+    /** Fork: same as `unlock`, for one inline secret block; resolves to its plaintext. */
+    unlockSecretBlock: (envelope: EncryptedNoteEnvelope, secret: string) => unlockWith(envelope, secret, openSecretBlock),
+
+    /** Fork: same as `decrypt`, for one inline secret block. */
+    decryptSecretBlock: (envelope: EncryptedNoteEnvelope) => decryptWith(envelope, openSecretBlock),
 
     /**
      * Re-encrypts an existing note with its own salt (so autosaves skip PBKDF2)

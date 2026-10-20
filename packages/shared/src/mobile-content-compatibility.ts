@@ -4,7 +4,7 @@ import { FILE_ATTACHMENT_NODE_TYPE } from "./file-attachment";
 import { PDF_ATTACHMENT_NODE_TYPE } from "./pdf-attachment";
 import { PLUGIN_EMBED_NODE_TYPE } from "./plugin-embed";
 import { EMPTY_EXTERNAL_LINK_NODE_TYPE } from "./empty-external-link";
-import { SECRET_BLOCK_NODE_TYPE } from "./secret-block";
+import { SECRET_BLOCK_NODE_TYPE, secretBlockPlaceholderText } from "./secret-block";
 
 export const UNSUPPORTED_BLOCK_NODE_TYPE = "edgeeverUnsupportedBlock" as const;
 export const UNSUPPORTED_INLINE_NODE_TYPE = "edgeeverUnsupportedInline" as const;
@@ -86,7 +86,10 @@ const fallbackAttrs = (
 ) => ({
   originalType: node.type,
   originalJson: JSON.stringify(node),
-  displayLabel: getFallbackLabel(node.type, locale),
+  // Fork: secret blocks show their plaintext label, never "unsupported content".
+  displayLabel: node.type === SECRET_BLOCK_NODE_TYPE
+    ? secretBlockPlaceholderText((node as TiptapNode).attrs?.label)
+    : getFallbackLabel(node.type, locale),
 });
 
 const parseOriginalNode = (attrs: Record<string, unknown> | undefined) => {
