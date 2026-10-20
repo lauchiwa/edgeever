@@ -91,6 +91,10 @@ import {
   createNoteLinkSuggestionExtension,
   type NoteLinkSuggestionLabels,
 } from "./editor/NoteLinkSuggestion";
+import { SecretBlock } from "./editor/SecretBlock";
+import { SecretBlockInsertDialog } from "./editor/SecretBlockInsertDialog";
+import { markdownHasSecretBlocks, redactSecretBlocksInMarkdown } from "@edgeever/shared";
+import { secretBlocksSupported } from "@/lib/secret-blocks";
 import { WeChatIcon } from "./WeChatIcon";
 import { useMarkdownTheme } from "./ThemeProvider";
 const MarkdownSourceEditor = lazy(() =>
@@ -497,6 +501,7 @@ const RichEditorPane = ({
   const openNoteSearchFromSelectionRef = useRef<(text: string, showReplace?: boolean) => void>(() => undefined);
   const closeNoteReplaceRef = useRef<() => void>(() => undefined);
   const [noteLinkPickerOpen, setNoteLinkPickerOpen] = useState(false);
+  const [secretBlockInsertOpen, setSecretBlockInsertOpen] = useState(false);
   const [noteLinkQuery, setNoteLinkQuery] = useState("");
   const [noteLinkHintPosition, setNoteLinkHintPosition] = useState<NoteLinkHintPosition | null>(null);
   const [externalLinkDialogOpen, setExternalLinkDialogOpen] = useState(false);
@@ -767,6 +772,7 @@ const RichEditorPane = ({
       attachment: t("editorToolbar.attachment"),
       "note-link": t("editorToolbar.noteLink"),
       "external-link": t("editorToolbar.externalLink"),
+      secret: t("secretBlock.name"),
     },
   };
   const slashCommandActionsRef = useRef<SlashCommandActions | null>(null);
@@ -777,6 +783,8 @@ const RichEditorPane = ({
       openExternalLinkPicker: () => openExternalLinkDialogRef.current(),
       openNoteLinkPicker: () => setNoteLinkPickerOpen(true),
       openMathFormula: (kind, range) => openMathFormulaRef.current(kind, range),
+      canInsertSecretBlock: secretBlocksSupported,
+      openSecretBlock: () => setSecretBlockInsertOpen(true),
     };
   }
   const slashCommandExtensionRef = useRef<ReturnType<typeof createSlashCommandExtension> | null>(null);
@@ -1240,6 +1248,7 @@ const RichEditorPane = ({
         pdf: PdfAttachment,
         file: FileAttachment,
         pluginEmbed: pluginEmbedExtension,
+        secretBlock: SecretBlock,
         table: { table: { renderWrapper: true } },
       }),
       EdgeEverLink.configure({ openOnClick: false }),
@@ -2100,13 +2109,13 @@ const RichEditorPane = ({
     markDirtyStatus();
   }, [markDirtyStatus]);
 
-  const getCurrentMarkdownForAi = useCallback(() => {
+  const getCurrentMarkdownForAi = useCallback(() => redactSecretBlocksInMarkdown((() => {
     if (useMobilePlainTextEditor) return getMobilePlainTextValue();
     if (useMarkdownSourceEditor) return markdownSource;
     return isEditorReady(editor)
       ? docToMarkdown(editor.getJSON() as TiptapDoc)
       : memoRef.current?.contentMarkdown ?? "";
-  }, [editor, getMobilePlainTextValue, markdownSource, useMarkdownSourceEditor, useMobilePlainTextEditor]);
+  })()), [editor, getMobilePlainTextValue, markdownSource, useMarkdownSourceEditor, useMobilePlainTextEditor]);
 
   const openAiAssistant = useCallback(() => {
     if (effectiveReadOnly) return;
@@ -2136,7 +2145,7 @@ const RichEditorPane = ({
       const selection = sourceEditor.getSelection();
       const text = sourceEditor.sliceText(selection.from, selection.to);
       if (!text.trim() || selection.to <= selection.from) return;
-      const clipped = clipSelectionForSend(text);
+      const clipped = clipSelectionForSend(redactSecretBlocksInMarkdown(text));
       pin = {
         memoId: currentMemo.id,
         text,
@@ -2152,9 +2161,9 @@ const RichEditorPane = ({
     } else if (isEditorReady(editor)) {
       const context = getRichTextAiSelectionContext(editor.state.doc, editor.state.selection);
       if (!context?.contentMarkdown.trim()) return;
-      const clipped = clipSelectionForSend(context.contentMarkdown);
+      const clipped = clipSelectionForSend(redactSecretBlocksInMarkdown(context.contentMarkdown));
       const plain = editor.state.doc.textBetween(context.from, context.to, "\n");
-      const visible = clipSelectionForSend(plain.trim() ? plain : context.contentMarkdown);
+      const visible = clipSelectionForSend(plain.trim() ? plain : redactSecretBlocksInMarkdown(context.contentMarkdown));
       pin = {
         memoId: currentMemo.id,
         text: context.contentMarkdown,
@@ -2179,7 +2188,8 @@ const RichEditorPane = ({
     const currentMemo = memoRef.current;
     if (!pin || !currentMemo || pin.memoId !== currentMemo.id) return false;
     const body = translationReplacement(replacement);
-    if (!body) return false;
+    // AI only saw the label; replacing the selection would delete the secret.
+    if (!body || markdownHasSecretBlocks(pin.text)) return false;
     if (pin.mode === "markdown") {
       const sourceEditor = markdownSourceEditorRef.current;
       if (!sourceEditor) return false;
@@ -3090,6 +3100,7 @@ const RichEditorPane = ({
       shareOpen ||
       mobileNotebookSheetOpen ||
       noteLinkPickerOpen ||
+      secretBlockInsertOpen ||
       externalLinkDialogOpen ||
       resourceDialog ||
       imagePreview
@@ -3883,6 +3894,7 @@ const RichEditorPane = ({
             : undefined
         }
       />
+      <SecretBlockInsertDialog editor={editor} open={secretBlockInsertOpen} onOpenChange={setSecretBlockInsertOpen} />
       {noteLinkPickerOpen && (
         <EditorNoteLinkPicker
           query={noteLinkQuery}

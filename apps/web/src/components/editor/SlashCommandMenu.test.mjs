@@ -55,6 +55,12 @@ describe("slash command menu", () => {
     ]);
   });
 
+  test("offers secret blocks only when the server protects them", () => {
+    expect(items.some((item) => item.id === "secret")).toBe(false);
+    const withSecret = createSlashCommandItems({ ...labels, items: { ...labels.items, secret: "加密块" } }, { secretBlock: true });
+    expect(filterSlashCommandItems(withSecret, "密码").map((item) => item.id)).toEqual(["secret"]);
+  });
+
   test("searches localized labels and aliases", () => {
     expect(filterSlashCommandItems(items, "AI").map((item) => item.id)).toEqual(["ai"]);
     expect(filterSlashCommandItems(items, "待办").map((item) => item.id)).toEqual(["task-list"]);

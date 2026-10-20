@@ -19,6 +19,7 @@ import { classifyLoginError, getLoginProblemMessageKey } from "@/lib/login-error
 import { EVERNOTE_MIGRATION_PATH } from "@/lib/routes";
 import { isBrowserOffline } from "@/lib/network-status";
 import { syncPublishedNoteBodyFont } from "@/lib/published-note-body-font";
+import { setSecretBlocksServerSupport } from "@/lib/secret-blocks";
 import type { AuthSession } from "@edgeever/shared";
 
 const EvernoteImportGuidePane = lazy(() =>
@@ -209,6 +210,7 @@ const AuthenticatedWorkspace = () => {
     );
   }
 
+  setSecretBlocksServerSupport(session.features?.secretBlocks === true);
   return (
     <Suspense fallback={<AuthLoadingScreen />}>
       <WorkspaceApp
