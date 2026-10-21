@@ -36,7 +36,10 @@ const ALLOWED_UPSTREAM = {
   // Unreachable in the fork APK: app.config.ts disables expo-updates, which hides the update card.
   "apps/mobile/src/lib/mobile-release.ts": { count: 3, why: "upstream APK update check, disabled in fork builds" },
   "apps/mobile/src/screens/LoginScreen.tsx": { count: 1, why: "project homepage link on the login screen" },
-  "packages/shared/src/font-catalog.ts": { count: 15, why: "poster fonts pinned to an upstream commit with sha256, not repository identity" },
+  // Poster and offline fonts pinned to upstream commits; the font loader checks each file's sha256.
+  "packages/shared/src/font-catalog-data.ts": { count: 15, why: "poster fonts pinned to an upstream commit with sha256, not repository identity" },
+  "packages/shared/src/font-defaults.ts": { count: 2, why: "offline fonts pinned to upstream commits with sha256, not repository identity" },
+  "packages/shared/src/font-resources.ts": { count: 1, why: "font CDN base pinned to an upstream commit with sha256, not repository identity" },
 };
 const SCANNED = ["apps/desktop/src", "apps/web/src", "apps/mobile/src", "apps/mobile/modules", "packages/shared/src"];
 // Also catches regex-escaped forms such as tianma-if\/edgeever, which hard-code
