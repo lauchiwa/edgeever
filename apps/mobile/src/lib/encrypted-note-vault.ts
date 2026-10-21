@@ -1,5 +1,6 @@
 import {
   ENCRYPTED_NOTE_AAD,
+  ENCRYPTED_NOTE_DEFAULT_AUTO_LOCK_MINUTES,
   encryptedNotePayloadJson,
   parseEncryptedNotePayloadJson,
   parseSecretBlockPayloadJson,
@@ -24,7 +25,7 @@ export type EncryptedNoteCryptoProvider = {
   decrypt: (key: string, iv: string, ciphertext: string, aad: string) => Promise<string>;
 };
 
-export const ENCRYPTED_NOTE_AUTO_LOCK_MS = 15 * 60 * 1000;
+export const ENCRYPTED_NOTE_AUTO_LOCK_MS = ENCRYPTED_NOTE_DEFAULT_AUTO_LOCK_MINUTES * 60 * 1000;
 
 export class EncryptedNoteWrongPassphraseError extends Error {
   constructor() {
@@ -37,8 +38,10 @@ export type EncryptedNoteVault = ReturnType<typeof createEncryptedNoteVault>;
 
 export const createEncryptedNoteVault = (
   provider: EncryptedNoteCryptoProvider,
-  { autoLockMs = ENCRYPTED_NOTE_AUTO_LOCK_MS, now = () => Date.now() } = {},
+  { autoLockMs: initialAutoLockMs = ENCRYPTED_NOTE_AUTO_LOCK_MS, now = () => Date.now() } = {},
 ) => {
+  // The device preference loads asynchronously, so the timeout can change after creation.
+  let autoLockMs = initialAutoLockMs;
   let passphrase: string | null = null;
   let lastActivity = 0;
   let autoLockTimer: ReturnType<typeof setTimeout> | null = null;
@@ -140,6 +143,22 @@ export const createEncryptedNoteVault = (
      */
     expireIfIdle: () => {
       if (passphrase && now() - lastActivity >= autoLockMs) lock(true);
+    },
+
+    /**
+     * Changes the idle timeout. An open session keeps its last activity time, so
+     * a shorter timeout that has already elapsed locks right away.
+     */
+    setAutoLockMs: (next: number) => {
+      autoLockMs = next;
+      if (!passphrase) return;
+      const remaining = autoLockMs - (now() - lastActivity);
+      if (remaining <= 0) {
+        lock(true);
+        return;
+      }
+      if (autoLockTimer) clearTimeout(autoLockTimer);
+      autoLockTimer = setTimeout(() => lock(true), remaining);
     },
 
     /** Decrypts with a typed passphrase; on success it becomes the session passphrase. */

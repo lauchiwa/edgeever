@@ -223,6 +223,10 @@ export const zhCN = {
     sessionError: "无法开始编辑会话，请重试。",
     autoLocked: "长时间未操作，已自动锁定。",
     readOnly: "只读",
+    settingsGroup: "加密内容",
+    autoLockTitle: "保险库自动锁定",
+    autoLockDescription: "超过这段时间未操作，加密笔记和加密块会自动锁定。仅保存在本机。",
+    autoLockOption: "{{count}} 分钟",
   },
   secretBlock: {
     name: "加密块",

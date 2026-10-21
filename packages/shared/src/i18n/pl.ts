@@ -212,6 +212,10 @@ export const pl = {
     sessionError: "Nie udało się rozpocząć sesji edycji. Spróbuj ponownie.",
     autoLocked: "Zablokowano po okresie bezczynności.",
     readOnly: "Tylko do odczytu",
+    settingsGroup: "Zaszyfrowana zawartość",
+    autoLockTitle: "Automatyczna blokada sejfu",
+    autoLockDescription: "Blokuj zaszyfrowane notatki i bloki po tym czasie bezczynności. Zapisywane tylko na tym urządzeniu.",
+    autoLockOption: "{{count}} min",
   },
   secretBlock: {
     name: "Blok tajny",

@@ -212,6 +212,10 @@ export const ja = {
     sessionError: "編集セッションを開始できませんでした。もう一度お試しください。",
     autoLocked: "一定時間操作がなかったためロックしました。",
     readOnly: "読み取り専用",
+    settingsGroup: "暗号化コンテンツ",
+    autoLockTitle: "保管庫の自動ロック",
+    autoLockDescription: "この時間操作がないと、暗号化ノートと暗号化ブロックをロックします。この端末にのみ保存されます。",
+    autoLockOption: "{{count}} 分",
   },
   secretBlock: {
     name: "シークレットブロック",

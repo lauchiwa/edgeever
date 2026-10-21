@@ -228,7 +228,7 @@ export const MobileEncryptedNotePane = ({
         <Text style={paneStyles.title}>{english ? "Encrypted note" : "加密笔记"}</Text>
         <Text style={paneStyles.body}>
           {vault.wasAutoLocked()
-            ? (english ? "Locked after 15 minutes of inactivity. Enter the vault passphrase to continue." : "15 分钟未操作已自动锁定，请输入保险库口令继续。")
+            ? (english ? "Locked after inactivity. Enter the vault passphrase to continue." : "长时间未操作，已自动锁定，请输入保险库口令继续。")
             : (english ? "Enter the vault passphrase to read and edit this note." : "输入保险库口令后即可阅读和编辑这篇笔记。")}
         </Text>
         <TextInput
