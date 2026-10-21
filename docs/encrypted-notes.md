@@ -27,7 +27,7 @@ A server built from this fork:
 
 The client offers encrypted notes only when the server advertises that capability.
 
-The fork's Android test build ([fork releases](fork-releases.md#android-test-build)) can unlock and edit existing encrypted notes:
+The fork's Android test build ([fork releases](fork-releases.md#android)) can unlock and edit existing encrypted notes:
 - The native module `apps/mobile/modules/edgeever-crypto` does PBKDF2 and AES-GCM with the platform's `javax.crypto`, because Hermes has no WebCrypto. The same envelope opens on web, desktop and Android.
 - The passphrase and keys stay in memory. The vault locks after 15 minutes of inactivity, on manual lock, or when the account or server changes.
 - Only ciphertext reaches the local SQLite mirror and the offline outbox. Local search and excerpts only see the placeholder. Plaintext is never written as a draft.

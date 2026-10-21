@@ -31,7 +31,7 @@ const read = (file) => readFileSync(join(root, file), "utf8");
 // The only upstream references allowed in shipped desktop/renderer code, each
 // pointing at something this fork deliberately does not publish itself.
 const ALLOWED_UPSTREAM = {
-  "apps/web/src/components/NotebookPane.tsx": { count: 1, why: "Android APK: the fork publishes no mobile release" },
+  "apps/web/src/components/NotebookPane.tsx": { count: 1, why: "Android download link still points at upstream's APK" },
   "apps/web/src/components/settings/SystemInfoPanel.tsx": { count: 2, why: "release notes of the upstream server instance" },
   "apps/web/src/components/settings/PluginManagerCard.tsx": { count: 2, why: "upstream plugin development docs" },
   // Unreachable in the fork APK: app.config.ts disables expo-updates, which hides the update card.

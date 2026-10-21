@@ -1,8 +1,8 @@
 # 二开版发布（lauchiwa/edgeever）
 
-本仓库是上游 EdgeEver（`tianma-if/edgeever`）的二次开发 fork。它在自己的 Releases 页面构建并发布 Windows、Linux 与 macOS 桌面版，已安装的二开客户端只从这里更新。不会向上游写入任何内容。English: [fork-releases.md](fork-releases.md).
+本仓库是上游 EdgeEver（`tianma-if/edgeever`）的二次开发 fork。它在自己的 Releases 页面构建并发布 Windows、Linux 与 macOS 桌面版以及签名的 Android APK，已安装的二开客户端只从这里更新。不会向上游写入任何内容。English: [fork-releases.md](fork-releases.md).
 
-当前范围：**Windows x64 桌面端、Linux x64 AppImage、macOS arm64 与 x64（见 [macOS](#macos)），以及服务端镜像** `ghcr.io/lauchiwa/edgeever`（API 与浏览器 Web 端）。不发布 Android 和 iOS 的二开版本。Android 只有作为工作流产物的**测试版**，见 [Android 测试版](#android-测试版)。[加密笔记](encrypted-notes.zh-CN.md)等二开功能需要二开客户端与运行二开镜像的服务端同时具备。
+当前范围：**Windows x64 桌面端、Linux x64 AppImage、macOS arm64 与 x64（见 [macOS](#macos)）、Android arm64 APK（见 [Android](#android)），以及服务端镜像** `ghcr.io/lauchiwa/edgeever`（API 与浏览器 Web 端）。不发布 iOS 的二开版本。[加密笔记](encrypted-notes.zh-CN.md)等二开功能需要二开客户端与运行二开镜像的服务端同时具备。
 
 ## 版本号
 
@@ -31,7 +31,7 @@ vX.Y.Z-rc.N
 | Linux 更新校验 | 与上游 Linux 预览版相同：来自本 fork Releases 的 HTTPS 下载、`rc-linux.yml` 中的 sha512（electron-updater 校验）和独立的 `SHA256SUMS-linux.txt`；**没有签名清单** | `fork-linux-release.test.mjs`、发布前的真实 AppImage 跨版本更新 |
 | macOS 更新校验 | 应用使用本 fork 的自签名证书签名；electron-updater 先校验 `rc-mac.yml` 中的 sha512，Squirrel.Mac 再要求更新满足正在运行应用的指定要求（designated requirement：bundle id `org.edgeever.desktop`，以及任一固定证书的 SHA-1）才会安装；`SHA256SUMS-macos.txt` 列出全部 zip 与磁盘映像。未经公证 | `fork-macos-release.test.mjs`、不变量测试、发布前在两种架构上做真实的已签名应用跨版本更新 |
 | 链接 | 诊断、反馈、桌面端下载指向 fork；服务端 Release 说明在二开镜像（`vX.Y.Z-rc.N`）下指向 fork，否则指向上游；保留若干有意指向上游的链接（Android APK 下载、上游服务端 Release 说明、插件文档、移动端的上游更新检查与主页链接、固定到上游 commit 的海报字体） | 上游地址扫描及白名单 |
-| Android 测试版 | 沿用包名 `org.edgeever.mobile`，使用二开 keystore；关闭 expo-updates 和应用内 APK 更新，上游 OTA 更新不会替换二开代码；原生解锁加密笔记 | 不变量测试、`fork-workflows.test.mjs`、`fork-android.yml` 中的 manifest 检查 |
+| Android | 沿用包名 `org.edgeever.mobile`，使用二开 keystore；关闭 expo-updates 和应用内 APK 更新，上游 OTA 更新不会替换二开代码；原生解锁加密笔记 | 不变量测试、`fork-workflows.test.mjs`、共享构建 action 中的 manifest 检查、签名时及发布前两次核对签名者 |
 | ACP | Windows ACP 修复 | ACP 测试、不变量测试 |
 | 加密笔记 | 客户端加密；服务端拒绝明文覆盖，并通告 `features.encryptedNotes` | `encrypted-note*.test.mjs`、`tests/e2e/encrypted-note.spec.ts` |
 | 服务端镜像 | `fork-docker-image.yml` 只发布 rc tag，从不发布 `latest` | `fork-workflows.test.mjs` |
@@ -140,14 +140,16 @@ vX.Y.Z-rc.N
    ```
 
 2. 其余步骤由 `fork-release.yml` 自动完成，无需手动操作：
-   - `windows`、`linux` 与 `macos`（arm64 和 x64）任务并行运行，都只持有只读令牌、读不到任何签名密钥。它们都会检查 tag 是否位于 `main` 上、运行发布检查（包括两把公钥都已固定）、写入版本号并构建和试启动应用：
+   - `windows`、`linux`、`macos`（arm64 和 x64）与 `android` 任务并行运行，都只持有只读令牌、读不到任何签名密钥。它们都会检查 tag 是否位于 `main` 上、运行发布检查（包括两把公钥都已固定）、写入版本号并构建和试启动应用：
      - `windows` 产出安装包、`rc.yml`、`latest-windows.json` 和 `SHA256SUMS-windows.txt`。
      - `linux` 在 Ubuntu 22.04（glibc 2.35 基线）上产出 AppImage、`rc-linux.yml` 和 `SHA256SUMS-linux.txt`，并做一次真实的跨版本自动更新：旧 AppImage 从只提供本次资产的本地更新源下载新 AppImage，替换自身后以新版本重启。旧版本取上一个带 Linux 资产的已发布二开版本；还没有时，用同一份源码按 `0.0.1-rc.0` 构建。
      - `macos` 为每种架构构建未签名的应用及其更新前置版本（选取方式与 Linux 相同）。
+     - `android` 构建 arm64-v8a APK，只带模板的调试签名。
    - `macos-sign` 在 `fork-macos` Environment 中运行，不安装任何依赖，用主证书签名两个应用（以及构建出的前置版本），再分别打包成 zip、磁盘映像、`rc-mac.yml` 和 `SHA256SUMS-macos.txt`。
    - `macos-verify` 校验签名、启动每个已签名应用，并在两种架构上做真实的跨版本更新：旧的已签名应用从本地更新源下载新 zip，Squirrel.Mac 按正在运行应用的指定要求校验后替换应用包，替换后的应用必须与已签名应用完全一致。
-   - `draft` 任务只在所有平台都通过后运行，把全部 13 个资产上传为 **Draft** 预发布版本。任一平台失败都不会创建或改动 Draft。
-   - `publish` 任务签名 `latest-windows.json`，上传签名，重新下载全部 14 个资产，按客户端的方式完整校验 Windows、Linux 与 macOS 资产，校验通过后才发布。
+   - `android-sign` 在 `fork-android` Environment 中运行，不安装任何依赖，用二开 keystore 签名 APK，只有唯一签名者与 `FORK_ANDROID_SIGNER_SHA256` 一致时才通过，然后整理出 `EdgeEver-X.Y.Z-rc.N-android-arm64.apk` 和 `SHA256SUMS-android.txt`。
+   - `draft` 任务只在所有平台都通过后运行，把全部 15 个资产上传为 **Draft** 预发布版本，说明中附各平台下载对照表。任一平台失败都不会创建或改动 Draft。
+   - `publish` 任务签名 `latest-windows.json`，上传签名，重新下载全部 16 个资产，按客户端的方式完整校验 Windows、Linux 与 macOS 资产，核对 APK 与其校验清单一致并再次用 `apksigner` 核对签名者，校验通过后才发布。
 
    客户端看不到 Draft，所以失败后可以安全重试：修复原因后，用同一个 tag 手动运行工作流（Actions → Fork release → 在 `main` 上 Run workflow）。
 3. 本机兜底方式，例如 Environment Secret 不可用时（使用 PowerShell 或 Windows Terminal，不要用 Git Bash；口令会提示输入）：
@@ -192,16 +194,22 @@ curl -fsS http://127.0.0.1:8787/api/v1/auth/session   # 应包含 features.encry
 
 回滚：停止服务，把 `EDGE_EVER_IMAGE` 和 `EDGE_EVER_VERSION` 恢复为原值，将 `/data` 备份恢复到空数据卷，然后重新启动。在上游镜像下加密笔记仍是密文：只有切回二开镜像后才能读取，在上游版本中编辑它们会将其覆盖。
 
-## Android 测试版
+## Android
 
-`fork-android.yml` 构建一个 arm64-v8a APK，供手工测试。它不是 Release 资产，也不会自动更新。
+每个 rc 版本都带有用二开 keystore 签名的 `EdgeEver-X.Y.Z-rc.N-android-arm64.apk`。它不会自动更新：每个新版本都需要手动下载安装。应用内显示的是 `apps/mobile/app.json` 中的 `version`（上游应用版本），可能与 Release 版本号不同；`versionCode` 相同或更高时可以覆盖安装，所以后续版本能覆盖之前的版本。
+
+只有两个任务能读取 keystore，都在 `fork-android` Environment 中运行、不安装任何依赖：rc tag 触发的 `fork-release.yml` 中的 `android-sign`，以及手动运行的 `fork-android.yml` 中的 `sign`。因此，控制了本 GitHub 账号或某次发布运行的人，可以签发一个能覆盖安装二开应用的 APK，风险边界与 Windows、macOS 密钥相同。
+
+### 两次发布之间的测试版
+
+`fork-android.yml` 从 `main` 构建 APK，供下一个 tag 之前测试使用。它不是 Release 资产。
 
 - 修改了移动端的 PR 只运行 `build`：类型检查、加密笔记测试、prebuild、检查 expo-updates 已关闭，以及 Gradle release 构建。这里读不到任何 Secret。
 - 在 Actions → Fork Android test build → Run workflow（选 `main`）手动运行时，还会运行 `sign`。它在 `fork-android` Environment 中运行，不安装任何依赖，用二开 keystore 签名 APK，并且只有唯一签名者与 `FORK_ANDROID_SIGNER_SHA256` 一致时才通过。从该运行下载 `edgeever-fork-android-apk`（保留 30 天），摘要中给出其 SHA-256。
 
 一次性配置 keystore，由维护者本人完成（PowerShell；代理不读取 keystore 及其口令）：
 
-1. 创建 Environment：Settings → Environments → New environment `fork-android`，部署分支限制为 `main`。
+1. 创建 Environment：Settings → Environments → New environment `fork-android`。部署规则与 `fork-release`、`fork-macos` 相同：分支 `main` 和 tag 规则 `v*-rc.*`；缺少 tag 规则时 `android-sign` 无法启动，版本不会发布。
 2. 生成密钥（`keytool` 会提示输入口令；PKCS12 的密钥口令与之相同）：
 
    ```powershell

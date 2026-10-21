@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { FORK_WINDOWS_UPDATE_KEYS } from "../apps/desktop/src/main/fork-config.mjs";
 import { createWindowsUpdateMetadata } from "./create-windows-update-metadata.mjs";
+import { ANDROID_CHECKSUM_FILE, ANDROID_SIGNER_ENV, androidApkName, androidReleaseAssetNames, defaultAndroidSignerCheck, stageAndroidRelease } from "./fork-android-release.mjs";
 import { writeLinuxBuild } from "./fork-linux-release.fixture.mjs";
 import { linuxAppImageName, linuxReleaseAssetNames } from "./fork-linux-release.mjs";
 import { writeMacRelease } from "./fork-macos-release.fixture.mjs";
@@ -44,11 +45,19 @@ const draftRelease = async () => {
   writeFileSync(join(build, "SHA256SUMS-linux.txt"), `${createHash("sha256").update(readFileSync(join(build, linuxAppImageName(VERSION)))).digest("hex")}  ${linuxAppImageName(VERSION)}
 `);
   writeMacRelease(build, VERSION);
-  return { draft: true, prerelease: true, files: Object.fromEntries(releaseAssetNames(VERSION).map((name) => [name, readFileSync(join(build, name))])) };
+  const signedApk = join(root, `signed-${Math.random().toString(36).slice(2)}.apk`);
+  writeFileSync(signedApk, "signed apk payload");
+  const androidStage = join(build, "android");
+  stageAndroidRelease({ apkPath: signedApk, stageDirectory: androidStage, version: VERSION });
+  const android = new Set(androidReleaseAssetNames(VERSION));
+  return { draft: true, prerelease: true, files: Object.fromEntries(releaseAssetNames(VERSION).map((name) => [name, readFileSync(join(android.has(name) ? androidStage : build, name))])) };
 };
 
+// Stands in for apksigner, which the test machine may not have.
+const FORK_SIGNER = "a".repeat(64);
 const options = (gh, overrides = {}) => ({
   tag: TAG, gh, privateKeyPath: keys.primaryPath, passphrase: PASSPHRASE, trustedPublicKeys: keys.trusted,
+  checkAndroidSigner: () => FORK_SIGNER,
   workDirectory: join(root, `work-${Math.random().toString(36).slice(2)}`), ...overrides,
 });
 
@@ -70,13 +79,14 @@ beforeEach(async () => {
 afterEach(() => rm(root, { recursive: true, force: true }));
 
 describe("fork release signing", () => {
-  test("signs a Draft, audits a fresh download of every Windows, Linux and macOS asset, then publishes it", async () => {
+  test("signs a Draft, audits a fresh download of every Windows, Linux, macOS and Android asset, then publishes it", async () => {
     const release = await draftRelease();
-    expect(Object.keys(release.files)).toEqual(expect.arrayContaining([...linuxReleaseAssetNames(VERSION), ...macReleaseAssetNames(VERSION)]));
+    expect(Object.keys(release.files)).toEqual(expect.arrayContaining([...linuxReleaseAssetNames(VERSION), ...macReleaseAssetNames(VERSION), ...androidReleaseAssetNames(VERSION)]));
     const gh = fakeGitHub(release);
     const result = await signAndPublishRelease(options(gh, { publish: true }));
     expect(result).toMatchObject({
-      tag: TAG, signed: true, keyId: FORK_WINDOWS_UPDATE_KEYS.primary.keyId, appImage: linuxAppImageName(VERSION), published: true,
+      tag: TAG, signed: true, keyId: FORK_WINDOWS_UPDATE_KEYS.primary.keyId, appImage: linuxAppImageName(VERSION),
+      apk: androidApkName(VERSION), apkSigner: FORK_SIGNER, published: true,
     });
     expect(result.macAssets.map((asset) => asset.name)).toEqual(macReleaseAssetNames(VERSION).slice(0, 4));
     expect(Object.keys(release.files)).toContain("latest-windows.json.sig");
@@ -122,6 +132,28 @@ describe("fork release signing", () => {
       await expect(signAndPublishRelease(options(fakeGitHub(release), { publish: true }))).rejects.toThrow();
       expect(release.draft).toBe(true);
     }
+  });
+
+  test("never publishes an APK that does not match its checksum list or carries another signer", async () => {
+    for (const name of [androidApkName(VERSION), ANDROID_CHECKSUM_FILE]) {
+      const release = await draftRelease();
+      release.files[name] = Buffer.concat([release.files[name], Buffer.from("x")]);
+      await expect(signAndPublishRelease(options(fakeGitHub(release), { publish: true }))).rejects.toThrow();
+      expect(release.draft).toBe(true);
+    }
+    const release = await draftRelease();
+    const otherSigner = () => { throw new Error("Android signer mismatch"); };
+    await expect(signAndPublishRelease(options(fakeGitHub(release), { publish: true, checkAndroidSigner: otherSigner }))).rejects.toThrow("signer mismatch");
+    expect(release.draft).toBe(true);
+    const missing = await draftRelease();
+    delete missing.files[androidApkName(VERSION)];
+    await expect(signAndPublishRelease(options(fakeGitHub(missing), { publish: true }))).rejects.toThrow("must contain exactly");
+  });
+
+  test("CI always checks the APK signer; locally only when the fingerprint is given", () => {
+    expect(() => defaultAndroidSignerCheck({ GITHUB_ACTIONS: "true" })).toThrow(ANDROID_SIGNER_ENV);
+    expect(defaultAndroidSignerCheck({ GITHUB_ACTIONS: "true", [ANDROID_SIGNER_ENV]: FORK_SIGNER })).toBeFunction();
+    expect(defaultAndroidSignerCheck({})).toBeUndefined();
   });
 
   test("refuses a Draft without its macOS assets", async () => {

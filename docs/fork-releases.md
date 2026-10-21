@@ -1,14 +1,14 @@
 # Fork releases (lauchiwa/edgeever)
 
 This repository is a customized fork of upstream EdgeEver (`tianma-if/edgeever`).
-It builds and publishes its own Windows, Linux and macOS desktop releases on its own
-Releases page, and installed fork clients update only from there. Upstream is never
+It builds and publishes its own Windows, Linux and macOS desktop releases, plus a
+signed Android APK, on its own Releases page, and installed fork clients update only from there. Upstream is never
 written to. 中文：[fork-releases.zh-CN.md](fork-releases.zh-CN.md).
 
 Scope today: **Windows x64 desktop, Linux x64 AppImage, macOS arm64 and x64
-(see [macOS](#macos)), plus the server image** `ghcr.io/lauchiwa/edgeever`
-(API and the browser Web app). Android and iOS fork builds are not published. An Android **test build** exists only as a workflow artifact, see
-[Android test build](#android-test-build). Fork-only features such as
+(see [macOS](#macos)), Android arm64 APK (see [Android](#android)), plus the
+server image** `ghcr.io/lauchiwa/edgeever` (API and the browser Web app). iOS
+fork builds are not published. Fork-only features such as
 [encrypted notes](encrypted-notes.md) need both a fork client and a server
 running the fork image.
 
@@ -46,7 +46,7 @@ refuses a base below one already released.
 | Linux update trust | as upstream's Linux Preview: HTTPS from this fork's Releases, the sha512 in `rc-linux.yml` (checked by electron-updater) and an independent `SHA256SUMS-linux.txt`; **no signed manifest** | `fork-linux-release.test.mjs`, a real AppImage update before publishing |
 | macOS update trust | apps signed with this fork's self-signed certificate; Squirrel.Mac installs an update only if it satisfies the running app's designated requirement (bundle id `org.edgeever.desktop` and the SHA-1 of either pinned certificate), after electron-updater checks the sha512 in `rc-mac.yml`; `SHA256SUMS-macos.txt` lists every zip and disk image. Not notarized | `fork-macos-release.test.mjs`, invariants, a real signed-app update on each architecture before publishing |
 | Links | diagnostics, feedback, desktop downloads point at the fork; server release notes point at the fork for a fork image (`vX.Y.Z-rc.N`) and upstream otherwise; deliberate upstream links remain (Android APK download, upstream server release notes, plugin docs, the mobile app's upstream update check and homepage link, poster fonts pinned to an upstream commit) | upstream-literal scan with an allowlist |
-| Android test build | same package `org.edgeever.mobile`, fork keystore; expo-updates and the in-app APK update are off, so upstream OTA updates never replace fork code; unlocks encrypted notes natively | invariants, `fork-workflows.test.mjs`, manifest check in `fork-android.yml` |
+| Android | same package `org.edgeever.mobile`, fork keystore; expo-updates and the in-app APK update are off, so upstream OTA updates never replace fork code; unlocks encrypted notes natively | invariants, `fork-workflows.test.mjs`, manifest check in the shared build action, signer check when signing and again before publishing |
 | ACP | Windows ACP fixes | ACP tests, invariants |
 | Encrypted notes | client-side encryption; the server refuses plaintext overwrites and advertises `features.encryptedNotes` | `encrypted-note*.test.mjs`, `tests/e2e/encrypted-note.spec.ts` |
 | Server image | `fork-docker-image.yml` publishes rc tags only, never `latest` | `fork-workflows.test.mjs` |
@@ -206,7 +206,7 @@ collide with upstream's next ones.
    ```
 
 2. `fork-release.yml` does the rest, with no manual step:
-   - `windows`, `linux` and `macos` (arm64 and x64) run in parallel with a
+   - `windows`, `linux`, `macos` (arm64 and x64) and `android` run in parallel with a
      read-only token and no access to any signing key. Each checks the tag is on `main`, runs the
      release gates (including both pinned keys), applies the version, and
      builds and launches the app:
@@ -221,6 +221,8 @@ collide with upstream's next ones.
        `0.0.1-rc.0`.
      - `macos` builds the unsigned app for each architecture, plus its update
        predecessor (chosen the same way as for Linux).
+     - `android` builds the arm64-v8a APK, signed only with the template's
+       debug key.
    - `macos-sign` runs in the `fork-macos` Environment, installs nothing, and
      signs both apps (and a built predecessor) with the primary certificate,
      then packs each into a zip, a disk image, `rc-mac.yml` and
@@ -230,12 +232,18 @@ collide with upstream's next ones.
      new zip from a local feed, Squirrel.Mac checks it against the running
      app's requirement and replaces the bundle, which must then hold exactly
      the signed app.
-   - `draft` runs only once every platform passes and uploads all thirteen
-     assets as a **Draft** pre-release. A failure on any platform creates or
+   - `android-sign` runs in the `fork-android` Environment, installs nothing,
+     signs the APK with the fork keystore, fails unless the only signer is the
+     one in `FORK_ANDROID_SIGNER_SHA256`, and stages
+     `EdgeEver-X.Y.Z-rc.N-android-arm64.apk` with `SHA256SUMS-android.txt`.
+   - `draft` runs only once every platform passes and uploads all fifteen
+     assets as a **Draft** pre-release, with a per-platform download table in
+     the notes. A failure on any platform creates or
      changes no Draft.
    - `publish` signs `latest-windows.json`, uploads the signature, downloads
-     all fourteen assets again, audits the Windows, Linux and macOS assets
-     exactly as a client would, and publishes only if that passes.
+     all sixteen assets again, audits the Windows, Linux and macOS assets
+     exactly as a client would, checks the APK against its checksum list and
+     its signer with `apksigner` again, and publishes only if that passes.
 
    Clients never see Drafts, so a failure is safe to retry: fix the cause, then
    run the workflow manually with the same tag (Actions → Fork release →
@@ -302,10 +310,26 @@ Rollback: stop the service, restore the old values of `EDGE_EVER_IMAGE` and
 start again. Encrypted notes stay ciphertext under an upstream image: readable
 only after switching back, and editing them there would overwrite them.
 
-## Android test build
+## Android
 
-`fork-android.yml` builds an arm64-v8a APK for testing by hand. It is not a
-release asset and never updates itself.
+Every rc release carries `EdgeEver-X.Y.Z-rc.N-android-arm64.apk`, signed with
+the fork keystore. It never updates itself: download and install each new
+release by hand. The app shows the `version` from `apps/mobile/app.json` (the
+upstream app version), which may differ from the release number; installing
+over the same or a higher `versionCode` works, so later releases install over
+earlier ones.
+
+The keystore is read only by two jobs, both in the `fork-android`
+Environment, installing nothing: `android-sign` in `fork-release.yml` on an rc
+tag, and `sign` in `fork-android.yml` on a manual run. Anyone in control of
+this GitHub account or of a release run can therefore sign an APK that
+installs over the fork app, the same boundary as for the Windows and macOS
+keys.
+
+### Test builds between releases
+
+`fork-android.yml` builds an APK from `main` for testing before the next tag.
+It is not a release asset.
 
 - Pull requests that touch the app run `build` only: type check, encrypted
   note tests, prebuild, a check that expo-updates is off, and the Gradle
@@ -320,7 +344,9 @@ One-time keystore setup, by the maintainer (PowerShell; the agent never reads
 the keystore or its password):
 
 1. Create the Environment: Settings → Environments → New environment
-   `fork-android`, deployment branches limited to `main`.
+   `fork-android`. Limit deployments to the branch `main` and the tag
+   pattern `v*-rc.*`, like `fork-release` and `fork-macos`; without the tag
+   rule, `android-sign` cannot start and the release stays unpublished.
 2. Create the key (`keytool` prompts for the password; PKCS12 uses it for the
    key too):
 

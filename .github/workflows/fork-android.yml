@@ -1,10 +1,10 @@
 name: Fork Android test build
 
-# Android test APK for this fork (lauchiwa/edgeever). It is not part of the
-# Windows rc release: the signed APK is only a workflow artifact the maintainer
-# downloads and installs by hand. Pull requests that touch the app only compile
-# it; signing runs on manual dispatch, in the fork-android environment, without
-# installing anything. See docs/fork-releases.md.
+# Android test APK for this fork (lauchiwa/edgeever) between releases. Every
+# rc release already ships a signed APK (fork-release.yml); this workflow is for
+# testing a main build before the next tag. Pull requests that touch the app
+# only compile it; signing runs on manual dispatch, in the fork-android
+# environment, without installing anything. See docs/fork-releases.md.
 on:
   workflow_dispatch:
   pull_request:
@@ -16,6 +16,7 @@ on:
       - "bun.lock"
       - "package.json"
       - ".github/workflows/fork-android.yml"
+      - ".github/actions/fork-android-build/**"
 
 permissions:
   contents: read
@@ -35,65 +36,11 @@ jobs:
       version_code: ${{ steps.apk.outputs.version_code }}
     steps:
       - uses: actions/checkout@v5
-      - uses: oven-sh/setup-bun@v2
+      # Shared with the release's android job; runs npm dependencies, so no secret here.
+      - id: apk
+        uses: ./.github/actions/fork-android-build
         with:
-          bun-version-file: package.json
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-      - name: Free disk space for the Android build
-        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/node_modules/@angular /opt/ghc /usr/local/.ghcup /usr/share/swift
-      - name: Install dependencies
-        run: |
-          for attempt in 1 2 3; do
-            bun install --frozen-lockfile && exit 0
-            [ "$attempt" = "3" ] && exit 1
-            sleep "$((15 * attempt))"
-          done
-      - run: bun run typecheck:mobile
-      # The Java crypto core is checked against WebCrypto here (the runner has a JDK).
-      - name: Encrypted note tests
-        run: >-
-          bun test packages/shared/src/encrypted-note.test.mjs
-          apps/mobile/modules/edgeever-crypto/test/encrypted-note-crypto.interop.test.ts
-          apps/mobile/src/lib/encrypted-note-vault.test.ts apps/mobile/src/lib/mobile-encrypted-note.test.ts
-          apps/mobile/src/screens/workspace-memo-cache.test.ts
-          scripts/fork-invariants.test.mjs scripts/fork-workflows.test.mjs
-      - name: Generate the Android project
-        working-directory: apps/mobile
-        env:
-          CI: "1"
-        run: bunx expo prebuild --platform android --no-install
-      # The fork APK must never take upstream's OTA updates (see app.config.ts).
-      - name: Check that upstream OTA updates are off
-        run: grep -F '<meta-data android:name="expo.modules.updates.ENABLED" android:value="false"/>' apps/mobile/android/app/src/main/AndroidManifest.xml
-      - name: Gradle release build
-        working-directory: apps/mobile/android
-        env:
-          NODE_ENV: production
-        run: >-
-          ./gradlew assembleRelease --no-daemon
-          -PreactNativeArchitectures=arm64-v8a
-          "-Dorg.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8"
-      - name: Read the APK version
-        id: apk
-        run: |
-          apk=apps/mobile/android/app/build/outputs/apk/release/app-release.apk
-          test -s "$apk"
-          aapt2="$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)aapt2"
-          badging="$("$aapt2" dump badging "$apk" | head -1)"
-          echo "$badging"
-          grep -q "name='org.edgeever.mobile'" <<<"$badging"
-          echo "version=$(sed -n "s/.*versionName='\([^']*\)'.*/\1/p" <<<"$badging")" >> "$GITHUB_OUTPUT"
-          echo "version_code=$(sed -n "s/.*versionCode='\([^']*\)'.*/\1/p" <<<"$badging")" >> "$GITHUB_OUTPUT"
-      # Signed only with the template's debug key: an intermediate for the sign job, not for installing.
-      - uses: actions/upload-artifact@v7
-        with:
-          name: android-apk-unsigned
-          path: apps/mobile/android/app/build/outputs/apk/release/app-release.apk
-          if-no-files-found: error
-          retention-days: 1
+          artifact-name: android-apk-unsigned
 
   # Never on pull requests: only a manual dispatch reaches the keystore.
   sign:
