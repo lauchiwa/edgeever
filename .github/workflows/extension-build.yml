@@ -4,6 +4,10 @@ on:
   pull_request:
     paths:
       - "apps/extension/**"
+      - "packages/shared/src/ai-generation.ts"
+      - "packages/shared/src/provider-event-stream.ts"
+      - "packages/shared/src/video-outline.ts"
+      - "packages/shared/package.json"
       - "apps/web/src/components/ui/**"
       - "apps/web/src/lib/utils.ts"
       - "tsconfig.json"
@@ -21,6 +25,10 @@ on:
       - main
     paths:
       - "apps/extension/**"
+      - "packages/shared/src/ai-generation.ts"
+      - "packages/shared/src/provider-event-stream.ts"
+      - "packages/shared/src/video-outline.ts"
+      - "packages/shared/package.json"
       - "apps/web/src/components/ui/**"
       - "apps/web/src/lib/utils.ts"
       - "tsconfig.json"

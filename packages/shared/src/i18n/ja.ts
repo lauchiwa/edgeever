@@ -2,7 +2,7 @@ import { memoTemplateSeedTranslations } from "../memo-template-seeds";
 
 // Shared by the PWA and native mobile clients.
 export const ja = {
-  fontLoad: {"loading": "フォントを読み込み中…", "ready": "フォントの準備完了", "error": "フォントを読み込めませんでした", "retry": "再試行"},
+  fontLoad: {"templateLoading": "フォントを読み込み中…", "templateFallback": "一時的に代替フォントを使用しています。読み込みが完了すると自動的に元に戻ります。", "loading": "フォントを読み込み中…", "ready": "フォントの準備完了", "error": "フォントを読み込めませんでした", "retry": "再試行"},
   noteProperties: {"heading": "ノートのプロパティ", "source": "YAML ソースを表示", "name": "プロパティ名", "type": "プロパティの種類", "add": "プロパティを追加", "remove": "{{name}} を削除", "invalidName": "重複しない、システム予約名以外の名前を入力してください。", "invalidYaml": "プロパティを確認してください：", "invalidNumber": "有効な数値を入力してください。", "listHint": "1 行に 1 つの値", "text": "テキスト", "list": "リスト", "number": "数値", "checkbox": "チェックボックス", "date": "日付"},
   poster: {
     design: {
@@ -395,13 +395,16 @@ export const ja = {
     "clearHelp": "すべてのチャット、発見、操作記録を完全に削除し、生成を停止します。記憶と発見の設定は残ります。以前スキップした出典グループが再表示される場合があります。必要なら先にバックアップをエクスポートしてください。",
     "forgetHelp": "この記憶と学習の根拠を削除し、同じ規則の自動再学習を止め、現在の生成を停止し、今後の自動コンテキストから古い返信を外します。既存のチャット本文、エクスポート済みバックアップ、提供元が保持するデータは削除されません。必要なら別途消去してください。",
     "configureModel": "チャットの前に、AI 設定でデフォルトモデルを設定してください。",
+    "clientUpdateRequired": "EdgeEver インスタンスとクライアントを更新してから、再試行してください。",
     "credentialsRejected": "デフォルトモデルの認証情報が拒否されました。AI 設定でプロバイダー URL と API キーを確認してください。",
     "providerPaymentRequired": "モデル提供元が残高不足を返しました。残高を確認してから再試行してください。",
     "providerRateLimited": "モデル提供元がレート制限しています。しばらく待ってから再試行してください。",
     "providerRequestRejected": "デフォルトモデルがこのリクエストを拒否しました。ツール呼び出しに対応しているか確認するか、別のデフォルトモデルを選んでください。",
     "failureDetails": {
+      "timeout": "モデルへのリクエストがタイムアウトしました。時間をおいて再試行し、続く場合はモデルサービスとネットワークプロキシを確認してください。",
+      "server": "モデルサービスでサーバーエラーが発生しました。時間をおいて再試行し、続く場合はサービスの稼働状況を確認してください。",
       "http": "リクエストが拒否されました。提供元のURL、モデルID、対応機能を確認してください。",
-      "network": "モデル提供元に接続できません。ネットワーク、プロキシ、URLを確認してください。",
+      "network": "この端末からモデルサービスに直接接続できません。URL とネットワークを確認してください。ブラウザーからのアクセスには、モデルサービスで CORS を許可する必要があります。",
       "invalidResponse": "応答形式に互換性がありません。APIプロトコルとストリーミング対応を確認してください。",
       "emptyResponse": "モデルはテキストも完了したツール呼び出しも返しませんでした。",
       "responseLimit": "モデルの応答が会話の長さ制限を超えました。",
@@ -2516,6 +2519,14 @@ export const ja = {
         warm: "あたたか",
       },
       fontStyle: "書体",
+      templateFonts: {
+        puhui: "Alibaba PuHuiTi",
+        misans: "MiSans",
+        mincho: "匯文明朝体",
+        song: "源ノ明朝",
+        longcang: "Long Cang",
+        geist: "Geist Mono",
+      },
       fontStyles: {
         "source-han-serif": "Noto Serif SC",
         "anton": "Anton",

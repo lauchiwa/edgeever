@@ -2,7 +2,7 @@ import { memoTemplateSeedTranslations } from "../memo-template-seeds";
 
 // Shared by the PWA and native mobile clients.
 export const pl = {
-  fontLoad: {"loading": "Ładowanie czcionki…", "ready": "Czcionka gotowa", "error": "Nie udało się załadować czcionki", "retry": "Ponów próbę"},
+  fontLoad: {"templateLoading": "Ładowanie czcionki…", "templateFallback": "Tymczasowo używane są czcionki zastępcze. Po załadowaniu oryginalne czcionki zostaną przywrócone automatycznie.", "loading": "Ładowanie czcionki…", "ready": "Czcionka gotowa", "error": "Nie udało się załadować czcionki", "retry": "Ponów próbę"},
   noteProperties: {"heading": "Właściwości notatki", "source": "Pokaż źródło YAML", "name": "Nazwa właściwości", "type": "Typ właściwości", "add": "Dodaj właściwość", "remove": "Usuń {{name}}", "invalidName": "Użyj unikalnej nazwy, która nie jest właściwością systemową.", "invalidYaml": "Sprawdź właściwości:", "invalidNumber": "Wprowadź poprawną liczbę.", "listHint": "Jedna wartość w wierszu", "text": "Tekst", "list": "Lista", "number": "Liczba", "checkbox": "Pole wyboru", "date": "Data"},
   poster: {
     design: {
@@ -395,13 +395,16 @@ export const pl = {
     "clearHelp": "Trwale usuwa wszystkie rozmowy, odkrycia i zapisy operacji oraz zatrzymuje generowanie. Wspomnienia i ustawienia odkryć pozostają. Wcześniej pominięte grupy źródeł mogą pojawić się ponownie. W razie potrzeby najpierw wyeksportuj kopię zapasową.",
     "forgetHelp": "Usuwa to wspomnienie i jego dowody nauki, blokuje automatyczne ponowne nauczenie się tej samej reguły, zatrzymuje bieżące generowanie i wyklucza stare odpowiedzi z przyszłego automatycznego kontekstu. Istniejący tekst rozmów, wyeksportowane kopie zapasowe i dane przechowywane przez dostawcę nie są usuwane; w razie potrzeby wyczyść je osobno.",
     "configureModel": "Przed rozpoczęciem rozmowy skonfiguruj domyślny model w ustawieniach AI.",
+    "clientUpdateRequired": "Zaktualizuj instancję EdgeEver i klienta, a następnie spróbuj ponownie.",
     "credentialsRejected": "Dane uwierzytelniające domyślnego modelu zostały odrzucone. Sprawdź adres URL dostawcy i klucz API w ustawieniach AI.",
     "providerPaymentRequired": "Dostawca modelu zgłosił brak wystarczających środków. Sprawdź saldo konta i spróbuj ponownie.",
     "providerRateLimited": "Dostawca modelu ograniczył liczbę żądań. Odczekaj chwilę i spróbuj ponownie.",
     "providerRequestRejected": "Domyślny model odrzucił to żądanie. Upewnij się, że obsługuje wywoływanie narzędzi, lub wybierz inny model domyślny.",
     "failureDetails": {
+      "timeout": "Upłynął limit czasu żądania modelu. Spróbuj ponownie później; jeśli problem się powtarza, sprawdź usługę modelu i serwer proxy.",
+      "server": "Usługa modelu zwróciła błąd serwera. Spróbuj ponownie później; jeśli problem się powtarza, sprawdź status dostawcy.",
       "http": "Żądanie zostało odrzucone. Sprawdź adres dostawcy, identyfikator modelu i obsługiwane funkcje.",
-      "network": "Nie można połączyć się z dostawcą modelu. Sprawdź sieć, proxy i adres dostawcy.",
+      "network": "To urządzenie nie może połączyć się bezpośrednio z usługą modelu. Sprawdź adres i sieć. Dostęp z przeglądarki wymaga też zezwolenia na CORS po stronie usługi modelu.",
       "invalidResponse": "Dostawca zwrócił niezgodną odpowiedź. Sprawdź protokół API i obsługę strumieniowania.",
       "emptyResponse": "Model nie zwrócił tekstu ani ukończonych wywołań narzędzi.",
       "responseLimit": "Odpowiedź modelu przekroczyła limit długości rozmowy.",
@@ -2516,6 +2519,14 @@ export const pl = {
         warm: "Ciepłe",
       },
       fontStyle: "Typografia",
+      templateFonts: {
+        puhui: "Alibaba PuHuiTi",
+        misans: "MiSans",
+        mincho: "Huiwen Mincho",
+        song: "Source Han Serif",
+        longcang: "Long Cang",
+        geist: "Geist Mono",
+      },
       fontStyles: {
         "source-han-serif": "Noto Serif SC",
         "anton": "Anton",

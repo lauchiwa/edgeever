@@ -2,7 +2,7 @@ import { memoTemplateSeedTranslations } from "../memo-template-seeds";
 
 // Shared by the PWA and native mobile clients.
 export const zhCN = {
-  fontLoad: {"loading": "字体加载中…", "ready": "字体已就绪", "error": "字体加载失败", "retry": "重试"},
+  fontLoad: {"templateLoading": "字体加载中…", "templateFallback": "暂时使用替代字体，加载成功后将自动恢复", "loading": "字体加载中…", "ready": "字体已就绪", "error": "字体加载失败", "retry": "重试"},
   noteProperties: {"heading": "笔记属性", "source": "显示 YAML 源码", "name": "属性名称", "type": "属性类型", "add": "添加属性", "remove": "删除 {{name}}", "invalidName": "请输入不重复且非系统保留的属性名称。", "invalidYaml": "请检查笔记属性：", "invalidNumber": "请输入有效数字。", "listHint": "每行一个值", "text": "文本", "list": "列表", "number": "数字", "checkbox": "复选框", "date": "日期"},
   poster: {
     design: {
@@ -406,13 +406,16 @@ export const zhCN = {
     "clearHelp": "删除全部聊天、发现及操作记录（不可撤销），并停止当前生成；保留记忆和发现设置。已略过的来源组可能再次出现。可先导出备份。",
     "forgetHelp": "删除这条记忆及关联学习证据，不再自动学习同一条规律，停止当前生成，并从后续自动上下文中排除旧回复。已有聊天文本、导出备份及模型服务商的数据不会随之删除；需要时请另行清空。",
     "configureModel": "请先在 AI 设置中配置默认模型，再开始聊天。",
+    "clientUpdateRequired": "请同步升级 EdgeEver 实例和客户端后重试。",
     "credentialsRejected": "默认模型的密钥被拒绝。请在 AI 设置中检查服务商地址和密钥。",
     "providerPaymentRequired": "模型服务商返回额度不足，请检查账户余额后重试。",
     "providerRateLimited": "模型服务商限流，请稍后再试。",
     "providerRequestRejected": "默认模型拒绝了这次请求。请确认该模型支持工具调用，或更换默认模型。",
     "failureDetails": {
+      "timeout": "模型请求超时，请稍后重试；若持续失败，请检查模型服务及网络代理。",
+      "server": "模型服务返回了服务端错误，请稍后重试；若持续失败，请检查服务商状态。",
       "http": "请求被拒绝，请检查服务商地址、模型 ID 和请求功能支持。",
-      "network": "无法连接模型服务商，请检查网络、代理和服务商地址。",
+      "network": "当前设备无法直连模型服务。请检查模型地址和网络；在浏览器中使用时，模型服务还需允许跨域访问（CORS）。",
       "invalidResponse": "服务商返回了不兼容的响应，请检查所选 API 协议及流式响应支持。",
       "emptyResponse": "模型未返回文本，也没有完成工具调用。",
       "responseLimit": "模型响应超过了对话长度限制。",
@@ -2525,6 +2528,14 @@ export const zhCN = {
         warm: "暖色",
       },
       fontStyle: "字体风格",
+      templateFonts: {
+        puhui: "阿里巴巴普惠体",
+        misans: "MiSans",
+        mincho: "汇文明朝体",
+        song: "思源宋体",
+        longcang: "龙藏体",
+        geist: "Geist Mono",
+      },
       fontStyles: {
         "source-han-serif": "思源宋体",
         "anton": "Anton",

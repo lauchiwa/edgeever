@@ -1,18 +1,28 @@
+import { prepareJikeWebDetail } from "./jike-web-test-state.mjs";
+import { readJikeWebStateInPage } from "./src/jike-web-state.ts";
+import { runInNewContext } from "node:vm";
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { createDocument } from "@mixmark-io/domino";
 import { readArticle } from "./src/article-clip.ts";
-import { readJike, jikeExpandButton } from "./src/jike-clip.ts";
+import { readJike as readJikeSource, jikeExpandButton } from "./src/jike-clip.ts";
 import { readDouban, doubanCommentTarget } from "./src/douban-clip.ts";
 import { isPlatformClip, platformTarget, socialPlatform } from "./src/platform-clip.ts";
 import { markdownToDoc } from "../../packages/shared/src/content.ts";
+
+const detailState=(doc,pageUrl,id)=>runInNewContext(`(${readJikeWebStateInPage.toString()})(id)`,{document:doc,location:{href:pageUrl},URL,id});
+const readJike=(doc,url,target=platformTarget(url),state)=>readJikeSource(doc,url,target,state ?? (url.includes('/u/') ? detailState(doc,url,target?.id) : undefined));
 
 const urls = {
   wechat:"https://mp.weixin.qq.com/s/TC-ONpL3PGklsD0yhtcuBQ",sspai:"https://sspai.com/post/92653",juejin:"https://juejin.cn/post/6972051526416072717",
   jike:"https://m.okjike.com/originalPosts/66ac89b0314f5cced41012d3","jike-grid":"https://m.okjike.com/originalPosts/6715e824d9dc81724c2ec74d","jike-long":"https://m.okjike.com/originalPosts/64c9dd9a2edae6abdc610605",
   "douban-book":"https://book.douban.com/review/16093028/","douban-movie":"https://movie.douban.com/review/17798662/","douban-music":"https://music.douban.com/review/17855287/","douban-note":"https://www.douban.com/note/814698224/",
 };
-const fixture=(name)=>createDocument(readFileSync(new URL(`./fixtures/platforms/${name}.html`,import.meta.url),"utf8"));
+const fixture=(name)=>{
+ const doc=createDocument(readFileSync(new URL(`./fixtures/platforms/${name}.html`,import.meta.url),"utf8"));
+ if(name==='jike-web-detail'||name==='jike-web-grid')prepareJikeWebDetail(doc,name==='jike-web-grid'?'6715e824d9dc81724c2ec74d':undefined);
+ return doc;
+};
 const read=(name,doc=fixture(name))=>name.startsWith("jike") ? readJike(doc,urls[name]) : name.startsWith("douban") ? readDouban(doc,platformTarget(urls[name]),urls[name]) : readArticle(doc,urls[name],"公众号");
 
 test("article URLs normalize aliases and tracking, retaining only WeChat query identity/signature",()=>{
@@ -280,6 +290,20 @@ test('article metadata retains source date precision and normalized own headline
  const d=fixture('substack-article'),s=d.querySelector('script'),v=JSON.parse(s.textContent);v.headline='The  Dot and the Swarm';d.querySelector('h1').textContent=v.headline;s.textContent=JSON.stringify(v);
  expect(substackContent(d,'https://www.oneusefulthing.org/p/the-dot-and-the-swarm').author).toBe('Ethan Mollick');
 });
+test('Substack image cleanup preserves captions and ordinary or labelled links without changing the source',async()=>{
+ const {substackContent}=await import('./src/substack-content.ts'),{platformHtmlMarkdown}=await import('./src/platform-clip.ts');
+ const d=fixture('substack-article'),body=d.querySelector('.body.markup'),url='https://www.oneusefulthing.org/p/the-dot-and-the-swarm';
+ body.innerHTML='<p>Before <a href="https://example.test/source">source</a></p><figure><a class="image-link image2" href="https://example.test/full.png"><div><picture><img src="https://example.test/preview.png" alt="Chart"></picture></div></a><figcaption>Chart caption</figcaption></figure><p><a class="image-link" href="https://example.test/book"><img src="https://example.test/book.png">Read the book</a></p><p><a class="image-link" href="https://example.test/more">More reading</a></p><p><a href="https://example.test/other"><img src="https://example.test/other.png" alt="Other"></a></p><p>After</p>';
+ const before=d.documentElement.outerHTML,article=substackContent(d,url),markdown=platformHtmlMarkdown(article.body,url),nodes=[];
+ const walk=node=>{nodes.push(node);(node.content || []).forEach(walk);};walk(markdownToDoc(markdown));
+ expect(nodes.filter(node=>node.type==='image').map(node=>node.attrs.src)).toEqual(['https://example.test/preview.png','https://example.test/book.png','https://example.test/other.png']);
+ const text=nodes.filter(node=>node.type==='text').map(node=>node.text).join('');
+ expect(text).toContain('Before sourceChart captionRead the bookMore reading');expect(text).toContain('After');expect(text).not.toContain('full.png');
+ for(const [label,href] of [['source','source'],['Read the book','book'],['More reading','more']]) expect(nodes.some(node=>node.text===label && node.marks?.some(mark=>mark.type==='link' && mark.attrs.href===`https://example.test/${href}`))).toBe(true);
+ expect(markdown).toContain('[![Other](https://example.test/other.png)](https://example.test/other)');
+ expect(d.documentElement.outerHTML).toBe(before);
+});
+
 test('only a visible real Substack paywall blocks whole-article extraction',async()=>{
  const {substackContent}=await import('./src/substack-content.ts'),{substackPaywall}=await import('./src/article-platform.ts'),d=fixture('substack-paywall'),url='https://www.lennysnewsletter.com/p/how-to-build-ai-product-sense';
  expect(substackPaywall(d)).toBe(true);expect(substackContent(d,url)).toBeNull();d.querySelector('.paywall').style.display='none';expect(substackPaywall(d)).toBe(false);expect(substackContent(d,url)).not.toBeNull();
@@ -487,4 +511,18 @@ test('Medium nested quote code and pre paragraph identity preserve language and 
  const before=d.documentElement.outerHTML,r=mediumContent(d,'https://medium.com/@writer/story-abcdef123456'),blocks=Array.from(r.body.querySelectorAll('pre'));
  expect(blocks.map(n=>n.textContent)).toEqual([code,'print(1)\nprint(2)']);expect(blocks.map(n=>n.className)).toEqual(['language-javascript','language-python']);expect(d.documentElement.outerHTML).toBe(before);
  const saved=[];const walk=n=>{if(n.type==='codeBlock')saved.push(n);for(const child of n.content||[])walk(child)};walk(markdownToDoc(platformHtmlMarkdown(r.body,'https://medium.com/@writer/story-abcdef123456')));expect(saved.map(n=>({language:n.attrs.language,text:n.content.map(c=>c.text).join('')}))).toEqual([{language:'javascript',text:code},{language:'python',text:'print(1)\nprint(2)'}]);
+});
+
+for(const invalid of ['old-post','missing-props','stale-marker'])test(`Jike Web detail rejects ${invalid} identity under a same-author new route`,()=>{
+ const d=fixture('jike-web-detail'),card=d.querySelector('[class*="_postCard_"]'),url=jikeWebUrl.replace('64c9dd9a2edae6abdc610605','6715e824d9dc81724c2ec74d');
+ if(invalid==='missing-props')delete card.__reactProps$fixture;
+ if(invalid==='stale-marker')card.setAttribute('data-edgeever-jike-id','6715e824d9dc81724c2ec74d');
+ expect(detailState(d,url,'6715e824d9dc81724c2ec74d')).toBeNull();
+ expect(readJike(d,url)).toEqual({ok:false,reason:'changed'});
+});
+
+test('Jike Web mobile mentions already containing @ match the same public post text',()=>{
+ const d=fixture('jike-web-detail');
+ for(const mention of d.querySelectorAll('[class*="_mentionUser_"]'))mention.textContent='@'+mention.textContent.trim();
+ const r=readJike(d,jikeWebUrl);expect(r.ok).toBe(true);expect(r.clip.markdown).toContain('凌空小鱼儿');expect(r.clip.markdown).not.toContain('@@');
 });
