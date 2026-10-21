@@ -30,7 +30,7 @@ vX.Y.Z-rc.N
 | Windows 更新签名 | 只信任本 fork 的 Ed25519 密钥，只接受 `X.Y.Z-rc.N` | `windows-update-trust.test.mjs`、固定的公钥指纹 |
 | Linux 更新校验 | 与上游 Linux 预览版相同：来自本 fork Releases 的 HTTPS 下载、`rc-linux.yml` 中的 sha512（electron-updater 校验）和独立的 `SHA256SUMS-linux.txt`；**没有签名清单** | `fork-linux-release.test.mjs`、发布前的真实 AppImage 跨版本更新 |
 | macOS 更新校验 | 应用使用本 fork 的自签名证书签名；electron-updater 先校验 `rc-mac.yml` 中的 sha512，Squirrel.Mac 再要求更新满足正在运行应用的指定要求（designated requirement：bundle id `org.edgeever.desktop`，以及任一固定证书的 SHA-1）才会安装；`SHA256SUMS-macos.txt` 列出全部 zip 与磁盘映像。未经公证 | `fork-macos-release.test.mjs`、不变量测试、发布前在两种架构上做真实的已签名应用跨版本更新 |
-| 链接 | 诊断、反馈、桌面端下载指向 fork；服务端 Release 说明在二开镜像（`vX.Y.Z-rc.N`）下指向 fork，否则指向上游；保留若干有意指向上游的链接（Android APK 下载、上游服务端 Release 说明、插件文档、移动端的上游更新检查与主页链接、固定到上游 commit 的海报字体） | 上游地址扫描及白名单 |
+| 链接 | 诊断、反馈、桌面端与 Android APK 下载指向 fork，Google Play 入口在 fork 拥有自己的上架渠道前隐藏；服务端 Release 说明在二开镜像（`vX.Y.Z-rc.N`）下指向 fork，否则指向上游；保留若干有意指向上游的链接（上游服务端 Release 说明、插件文档、移动端的上游更新检查与主页链接、固定到上游 commit 的海报字体） | 上游地址扫描及白名单；下载菜单检查 |
 | Android | 沿用包名 `org.edgeever.mobile`，使用二开 keystore；关闭 expo-updates 和应用内 APK 更新，上游 OTA 更新不会替换二开代码；原生解锁加密笔记 | 不变量测试、`fork-workflows.test.mjs`、共享构建 action 中的 manifest 检查、签名时及发布前两次核对签名者 |
 | ACP | Windows ACP 修复 | ACP 测试、不变量测试 |
 | 加密笔记 | 客户端加密；服务端拒绝明文覆盖，并通告 `features.encryptedNotes` | `encrypted-note*.test.mjs`、`tests/e2e/encrypted-note.spec.ts` |
