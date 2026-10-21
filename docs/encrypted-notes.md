@@ -4,9 +4,9 @@ Encrypted notes are opt-in. The client encrypts the note body before saving it, 
 
 ## How it works
 
-- The body is encrypted in the Web/desktop client with WebCrypto. The key is derived with PBKDF2-SHA256 (600,000 iterations, a fresh salt per note) and the body is sealed with AES-256-GCM (a fresh IV on every save). The passphrase and derived keys stay in memory only. The vault locks after 15 minutes of inactivity, or when you lock it manually.
+- The body is encrypted in the Web/desktop client with WebCrypto. The key is derived with PBKDF2-SHA256 (600,000 iterations, a fresh salt per note) and the body is sealed with AES-256-GCM (a fresh IV on every save). The passphrase and derived keys stay in memory only. The vault locks after a period of inactivity (5 minutes by default; choose 1, 5, 15 or 30 under Settings → General → Encrypted content, stored per device and never synced), or when you lock it manually.
 - Storage reuses the existing columns, so no migration is needed. `content_markdown` holds a placeholder line plus an `<!-- edgeever-encrypted-v1:… -->` envelope. `content_json` and `content_text` only hold the placeholder "🔒 Encrypted note", so search, excerpts, AI and MCP see nothing else.
-- One vault passphrase is shared by all encrypted notes. Each device keeps a small encrypted verifier in local storage that catches a mistyped passphrase when you create a note. It is per device and does not sync.
+- One vault passphrase is shared by all encrypted notes and secret blocks. Once one of them is unlocked, the others open without asking again until the vault locks. Each device keeps a small encrypted verifier in local storage that catches a mistyped passphrase when you create a note. It is per device and does not sync.
 
 ## Deliberate limits
 
@@ -29,7 +29,7 @@ The client offers encrypted notes only when the server advertises that capabilit
 
 The fork's Android test build ([fork releases](fork-releases.md#android)) can unlock and edit existing encrypted notes:
 - The native module `apps/mobile/modules/edgeever-crypto` does PBKDF2 and AES-GCM with the platform's `javax.crypto`, because Hermes has no WebCrypto. The same envelope opens on web, desktop and Android.
-- The passphrase and keys stay in memory. The vault locks after 15 minutes of inactivity, on manual lock, or when the account or server changes.
+- The passphrase and keys stay in memory. The vault locks after the idle timeout chosen under Settings → General (5 minutes by default, per device), on manual lock, or when the account or server changes.
 - Only ciphertext reaches the local SQLite mirror and the offline outbox. Local search and excerpts only see the placeholder. Plaintext is never written as a draft.
 - Rich-text editing, AI drafts, images and attachments are blocked for encrypted notes. Creating one is still done on web or desktop.
 
@@ -75,4 +75,5 @@ Not yet verified:
 - the Windows desktop app end to end;
 - upgrading a real deployment from the upstream image;
 - the behaviour of upstream mobile apps on a real device;
+- the configurable auto-lock timeout on Windows and on an Android device;
 - one Android edit of a note with secret blocks stayed on "Saving" until the app was restarted. It did not happen again, also with logcat attached, and the cause is unknown.

@@ -133,6 +133,34 @@ describe("mobile encrypted-note vault", () => {
     expect(vault.wasAutoLocked()).toBe(true);
   });
 
+  // Fork: the device preference can shorten or lengthen the timeout of an open session.
+  test("a changed idle timeout applies to the open session from its last activity", async () => {
+    let clock = 1_000;
+    const vault = createEncryptedNoteVault(nodeProvider(), { autoLockMs: 15 * 60_000, now: () => clock });
+    await vault.unlock(await webEnvelope("a"), PASSPHRASE);
+    clock += 2 * 60_000;
+    vault.setAutoLockMs(5 * 60_000);
+    expect(vault.isUnlocked()).toBe(true);
+    clock += 3 * 60_000;
+    vault.expireIfIdle();
+    expect(vault.isUnlocked()).toBe(false);
+    expect(vault.wasAutoLocked()).toBe(true);
+
+    await vault.unlock(await webEnvelope("b"), PASSPHRASE);
+    clock += 2 * 60_000;
+    vault.setAutoLockMs(60_000);
+    expect(vault.isUnlocked()).toBe(false);
+    expect(vault.wasAutoLocked()).toBe(true);
+  });
+
+  test("the rescheduled timer locks with the new timeout", async () => {
+    const vault = createEncryptedNoteVault(nodeProvider(), { autoLockMs: 60_000 });
+    await vault.unlock(await webEnvelope("a"), PASSPHRASE);
+    vault.setAutoLockMs(20);
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(vault.isUnlocked()).toBe(false);
+  });
+
   test("the idle timer itself locks the vault", async () => {
     const vault = createEncryptedNoteVault(nodeProvider(), { autoLockMs: 20 });
     await vault.unlock(await webEnvelope("a"), PASSPHRASE);

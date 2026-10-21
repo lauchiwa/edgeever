@@ -223,6 +223,10 @@ export const enUS = {
     sessionError: "Could not start an editing session. Try again.",
     autoLocked: "Locked after inactivity.",
     readOnly: "Read only",
+    settingsGroup: "Encrypted content",
+    autoLockTitle: "Auto-lock vault",
+    autoLockDescription: "Lock encrypted notes and secret blocks after this long without activity. Stored on this device only.",
+    autoLockOption: "{{count}} min",
   },
   secretBlock: {
     name: "Secret block",

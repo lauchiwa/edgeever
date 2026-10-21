@@ -59,6 +59,7 @@ import { useShowDescendantNotesPreference, writeShowDescendantNotesPreference } 
 import { PicGoSettingsItem } from "./PicGoSettingsItem";
 import { NoteProseCssEditor } from "./NoteProseCssEditor";
 import { NoteProseCssPreview } from "./NoteProseCssPreview";
+import { EncryptedNoteSettingsSection } from "./EncryptedNoteSettingsSection";
 
 const PreferenceSection = ({ title, children }: { title: string; children: ReactNode }) => (
   <section className="grid gap-2">
@@ -633,6 +634,7 @@ export const PreferenceCard = ({
           </div>
         </div>
       </PreferenceSection>
+      <EncryptedNoteSettingsSection />
       <Dialog open={cssDialogOpen} onOpenChange={setCssDialogOpen}>
         <DialogContent className="flex h-[min(44rem,calc(100dvh-2rem))] max-w-2xl flex-col gap-4 overflow-hidden">
           <DialogHeader className="shrink-0 pr-8">

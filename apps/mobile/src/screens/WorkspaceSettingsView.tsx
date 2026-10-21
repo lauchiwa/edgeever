@@ -14,6 +14,7 @@ import type { MobileLocalePreference } from "../lib/preferences";
 import { useSession } from "../lib/session";
 import { loadMobileSyncQueueSummary } from "../lib/sync-queue";
 import { AccountSecurityPanel } from "./AccountSecurityModal";
+import { MobileVaultAutoLockSetting } from "./MobileVaultAutoLockSetting";
 import { getResolvedMobileLocale, isEnglishMobileLocale } from "./workspace-utils";
 import { styles } from "./workspace-styles";
 
@@ -238,6 +239,7 @@ export const SettingsView = ({
                 </View>
               </View>
             </View>
+            <MobileVaultAutoLockSetting />
           </SettingsGroup>
         </View>
       );

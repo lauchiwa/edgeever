@@ -143,7 +143,7 @@ export const MobileSecretBlockModal = ({
             <>
               <Text style={styles.body}>
                 {vault.wasAutoLocked()
-                  ? (english ? "Locked after 15 minutes of inactivity. Enter the vault passphrase to show this block." : "15 分钟未操作已自动锁定，请输入保险库口令显示此加密块。")
+                  ? (english ? "Locked after inactivity. Enter the vault passphrase to show this block." : "长时间未操作，已自动锁定，请输入保险库口令显示此加密块。")
                   : (english ? "Enter the vault passphrase to show this block." : "输入保险库口令后显示此加密块。")}
               </Text>
               <TextInput

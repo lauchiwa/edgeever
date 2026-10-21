@@ -9,17 +9,19 @@ import {
   encryptNoteDoc,
   serializeEncryptedNoteEnvelope,
   parseEncryptedNoteEnvelope,
+  type EncryptedNoteAutoLockMinutes,
   type EncryptedNoteEnvelope,
   type TiptapDoc,
 } from "@edgeever/shared";
+import { readEncryptedNoteAutoLockMinutes, writeEncryptedNoteAutoLockMinutes } from "./encrypted-note-auto-lock-preference";
 
 /**
  * In-memory vault session for encrypted notes. The passphrase and derived
  * keys live only in this module; nothing is persisted except a per-device
  * verifier (itself an encrypted envelope) used to catch a mistyped vault
- * passphrase when creating a new note.
+ * passphrase when creating a new note. The idle timeout is a per-device
+ * preference read on every touch.
  */
-const AUTO_LOCK_MS = 15 * 60 * 1000;
 const VERIFIER_STORAGE_PREFIX = "edgeever.encrypted-note-verifier:";
 const VERIFIER_DOC: TiptapDoc = { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "edgeever-vault-check" }] }] };
 
@@ -48,7 +50,13 @@ const keyFor = (secret: string, salt: string, iterations: number) => {
 export const touchEncryptedNoteVault = () => {
   if (!passphrase) return;
   if (autoLockTimer) clearTimeout(autoLockTimer);
-  autoLockTimer = setTimeout(() => lockEncryptedNoteVault(true), AUTO_LOCK_MS);
+  autoLockTimer = setTimeout(() => lockEncryptedNoteVault(true), readEncryptedNoteAutoLockMinutes() * 60 * 1000);
+};
+
+/** Saves the idle timeout and restarts an open session's timer with it. */
+export const setEncryptedNoteVaultAutoLockMinutes = (minutes: EncryptedNoteAutoLockMinutes) => {
+  writeEncryptedNoteAutoLockMinutes(minutes);
+  touchEncryptedNoteVault();
 };
 
 const setSessionPassphrase = (next: string) => {

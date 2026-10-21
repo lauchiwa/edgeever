@@ -18,6 +18,19 @@ const MAX_ENVELOPE_LENGTH = 8_000_000;
 export const ENCRYPTED_NOTE_PLACEHOLDER_TEXT = "🔒 Encrypted note";
 export const ENCRYPTED_NOTE_PBKDF2_ITERATIONS = 600_000;
 export const ENCRYPTED_NOTE_MIN_PASSPHRASE_LENGTH = 8;
+
+/** Per-device vault idle timeout choices (minutes); stored locally, never synced. */
+export const ENCRYPTED_NOTE_AUTO_LOCK_MINUTE_OPTIONS = [1, 5, 15, 30] as const;
+export type EncryptedNoteAutoLockMinutes = (typeof ENCRYPTED_NOTE_AUTO_LOCK_MINUTE_OPTIONS)[number];
+export const ENCRYPTED_NOTE_DEFAULT_AUTO_LOCK_MINUTES: EncryptedNoteAutoLockMinutes = 5;
+
+/** Parses a stored value; anything unknown falls back to the default. */
+export const resolveEncryptedNoteAutoLockMinutes = (stored: string | null | undefined): EncryptedNoteAutoLockMinutes => {
+  const value = Number(stored);
+  return (ENCRYPTED_NOTE_AUTO_LOCK_MINUTE_OPTIONS as readonly number[]).includes(value)
+    ? (value as EncryptedNoteAutoLockMinutes)
+    : ENCRYPTED_NOTE_DEFAULT_AUTO_LOCK_MINUTES;
+};
 /** AES-GCM additional data; native crypto (Android) must authenticate the same bytes. */
 export const ENCRYPTED_NOTE_AAD = MARKER;
 
