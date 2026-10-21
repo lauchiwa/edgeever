@@ -31,7 +31,6 @@ const read = (file) => readFileSync(join(root, file), "utf8");
 // The only upstream references allowed in shipped desktop/renderer code, each
 // pointing at something this fork deliberately does not publish itself.
 const ALLOWED_UPSTREAM = {
-  "apps/web/src/components/NotebookPane.tsx": { count: 1, why: "Android download link still points at upstream's APK" },
   "apps/web/src/components/settings/SystemInfoPanel.tsx": { count: 2, why: "release notes of the upstream server instance" },
   "apps/web/src/components/settings/PluginManagerCard.tsx": { count: 2, why: "upstream plugin development docs" },
   // Unreachable in the fork APK: app.config.ts disables expo-updates, which hides the update card.
@@ -169,6 +168,15 @@ describe("fork Android app", () => {
     expect(read("apps/mobile/src/screens/WorkspaceMemoDetail.tsx")).toContain("<MobileEncryptedNotePane");
     expect(read("apps/mobile/src/screens/WorkspaceScreen.tsx")).toMatch(/if \(isMobileEncryptedNote\(memo\.contentMarkdown\)\) return;/);
     expect(existsSync(join(root, "apps/mobile/modules/edgeever-crypto/android/src/main/java/org/edgeever/crypto/EncryptedNoteCrypto.java"))).toBe(true);
+  });
+
+  // The Play listing is upstream's app, signed with another key, so it cannot
+  // replace or be replaced by the fork APK.
+  test("the web download menu offers the fork APK and hides Google Play", () => {
+    const pane = read("apps/web/src/components/NotebookPane.tsx");
+    expect(pane).toContain("const ANDROID_APK_URL = FORK_RELEASES_URL;");
+    expect(pane).toContain("const SHOW_ANDROID_PLAY = false;");
+    expect(pane).toMatch(/\{SHOW_ANDROID_PLAY && \(\s*<DropdownMenuItem asChild>\s*<a\s+href=\{ANDROID_PLAY_URL\}/);
   });
 });
 

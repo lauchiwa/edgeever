@@ -76,11 +76,13 @@ const DesktopSyncIssuesDialog = lazy(() => import("./DesktopSyncIssuesDialog").t
 const NOTEBOOK_SIDEBAR_ID = "edgeever-notebook-sidebar";
 const NOTEBOOK_DRAG_SCROLL_EDGE_PX = 56;
 const NOTEBOOK_DRAG_SCROLL_MAX_STEP_PX = 18;
-// Fork: desktop builds come from the fork (pre-releases, so not /latest).
-// Android stays upstream: the fork does not publish mobile builds.
+// Fork: desktop builds and the Android APK come from the fork (pre-releases, so not /latest).
 const DESKTOP_DOWNLOAD_URL = FORK_RELEASES_URL;
+// Fork: no Google Play listing yet (upstream's app is signed differently), so the entry is not rendered.
+// Flip this once the fork ships on Google Play and point ANDROID_PLAY_URL at that listing.
+const SHOW_ANDROID_PLAY = false;
 const ANDROID_PLAY_URL = "https://play.google.com/store/apps/details?id=org.edgeever.mobile";
-const ANDROID_APK_URL = "https://github.com/tianma-if/edgeever/releases/latest";
+const ANDROID_APK_URL = FORK_RELEASES_URL;
 const IOS_DOWNLOAD_URL = "https://apps.apple.com/us/app/edgeever/id6792625631";
 const CHROMIUM_CLIPPER_URL = "https://chromewebstore.google.com/detail/edgeever-web-clipper/gjadpfmanienmlofajibkfkkpfdkclgo";
 const FIREFOX_CLIPPER_URL = "https://addons.mozilla.org/firefox/addon/edgeever-web-clipper/";
@@ -1069,6 +1071,7 @@ export const NotebookPane = ({
                     {t("pwa.sidebarWindowsAvailability")}
                   </TooltipContent>
                 </Tooltip>
+                {SHOW_ANDROID_PLAY && (
                 <DropdownMenuItem asChild>
                   <a
                     href={ANDROID_PLAY_URL}
@@ -1089,6 +1092,7 @@ export const NotebookPane = ({
                     </div>
                   </a>
                 </DropdownMenuItem>
+                )}
                 <DropdownMenuItem asChild>
                   <a
                     href={ANDROID_APK_URL}
