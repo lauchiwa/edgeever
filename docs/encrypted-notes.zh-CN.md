@@ -34,7 +34,7 @@
 
 客户端只有在服务端声明了这项能力时，才会提供加密笔记。
 
-本 fork 的 Android 测试版（见[二开版发布](fork-releases.zh-CN.md#android-测试版)）可以解锁并编辑已有的加密笔记：
+本 fork 的 Android 测试版（见[二开版发布](fork-releases.zh-CN.md#android)）可以解锁并编辑已有的加密笔记：
 - Hermes 没有 WebCrypto，所以由原生模块 `apps/mobile/modules/edgeever-crypto` 调用系统 `javax.crypto` 完成 PBKDF2 与 AES-GCM。同一份密文信封在 Web、桌面端和 Android 上都能打开。
 - 口令和密钥只放在内存里。空闲 15 分钟、手动锁定，或切换账号或服务器时会清除。
 - 本地 SQLite 镜像和离线待发送队列里只有密文，本地搜索和摘要只看到占位文字，明文从不写入草稿。

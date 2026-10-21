@@ -1,10 +1,10 @@
 name: Fork release
 
-# Builds, signs and publishes this fork's Windows x64, Linux x64 and macOS
-# arm64/x64 release. Pushing a tag vX.Y.Z-rc.N runs it end to end (see
-# docs/fork-releases.md).
+# Builds, signs and publishes this fork's Windows x64, Linux x64, macOS
+# arm64/x64 and Android arm64 release. Pushing a tag vX.Y.Z-rc.N runs it end to
+# end (see docs/fork-releases.md).
 #
-# - windows, linux, macos: build and verify each platform in parallel and keep
+# - windows, linux, macos, android: build and verify each platform in parallel and keep
 #   the assets as workflow artifacts. They have no access to any signing key
 #   and only a read token, so the build tools and npm dependencies they run
 #   never see a key and cannot change a release. linux also runs a real update
@@ -16,6 +16,9 @@ name: Fork release
 #   certificate pinned in fork-config.mjs and packs the zips and disk images.
 # - macos-verify: launches the signed apps and runs a real update from an
 #   older signed app to the new one, on each architecture.
+# - android-sign: the only job in the fork-android Environment, which holds
+#   the fork keystore. It installs nothing, signs the APK and checks that the
+#   fork certificate is its only signer.
 # - draft: once all pass, uploads all assets as an unsigned Draft
 #   pre-release. It installs and runs nothing from the repository.
 # - publish: the only job in the fork-release Environment, which holds the
@@ -567,10 +570,89 @@ jobs:
           bun scripts/fork-verify-macos-app-update.mjs \
             "${RUNNER_TEMP}/predecessors/${ARCH}.zip" "${RUNNER_TEMP}/fork-release" "${TAG#v}" "${ARCH}"
 
+  android:
+    if: github.repository == 'lauchiwa/edgeever'
+    name: Build Android arm64 APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: Check the tag
+        run: |
+          set -euo pipefail
+          node scripts/fork-release-version.mjs check "${TAG}"
+          git fetch origin main
+          git merge-base --is-ancestor "${TAG}^{commit}" origin/main || {
+            echo "::error::${TAG} is not on main. Release only reviewed, merged commits."; exit 1; }
+          if gh release view "${TAG}" -R "${GITHUB_REPOSITORY}" --json isDraft --jq .isDraft 2>/dev/null | grep -qx false; then
+            echo "::error::${TAG} is already published; a published release is never rebuilt."; exit 1
+          fi
+
+      # Same build as fork-android.yml; signed only with the template's debug key.
+      - uses: ./.github/actions/fork-android-build
+        with:
+          artifact-name: fork-android-unsigned
+
+  # The only job in the fork-android Environment, which holds the fork
+  # keystore. Like macos-sign it installs nothing and runs only the workflow
+  # commit's dependency-free scripts.
+  android-sign:
+    if: github.repository == 'lauchiwa/edgeever'
+    name: Sign Android APK
+    needs: android
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: fork-android
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v7
+        with:
+          name: fork-android-unsigned
+          path: ${{ runner.temp }}/unsigned
+      - name: Sign with the fork keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.FORK_ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.FORK_ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          : "${KEYSTORE_BASE64:?Set the FORK_ANDROID_KEYSTORE_BASE64 secret in the fork-android environment}"
+          : "${KEYSTORE_PASSWORD:?Set the FORK_ANDROID_KEYSTORE_PASSWORD secret in the fork-android environment}"
+          umask 077
+          keystore="${RUNNER_TEMP}/fork-android.p12"
+          trap 'rm -f "${keystore}"' EXIT
+          printf '%s' "${KEYSTORE_BASE64}" | base64 --decode > "${keystore}"
+          apksigner="$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)apksigner"
+          "${apksigner}" sign --ks "${keystore}" --ks-type PKCS12 --ks-key-alias edgeever-fork \
+            --ks-pass env:KEYSTORE_PASSWORD --key-pass env:KEYSTORE_PASSWORD --v4-signing-enabled false \
+            --out "${RUNNER_TEMP}/signed.apk" "${RUNNER_TEMP}/unsigned/app-release.apk"
+      # Fails unless the APK carries exactly one signer: the fork's own certificate.
+      - name: Verify the signer and stage the APK
+        env:
+          EDGE_EVER_ANDROID_ALLOWED_SIGNER_SHA256: ${{ vars.FORK_ANDROID_SIGNER_SHA256 }}
+        run: node scripts/fork-android-release.mjs stage "${RUNNER_TEMP}/signed.apk" "${RUNNER_TEMP}/fork-release" "${TAG#v}"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: fork-release-android
+          path: ${{ runner.temp }}/fork-release/*
+          if-no-files-found: error
+          retention-days: 7
+
   draft:
     if: github.repository == 'lauchiwa/edgeever'
     name: Upload Draft pre-release
-    needs: [windows, linux, macos-verify]
+    needs: [windows, linux, macos-verify, android-sign]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -593,9 +675,41 @@ jobs:
           stage="${RUNNER_TEMP}/fork-release"
           base="${version%-rc.*}"
           ls -la "${stage}"
-          notes="$(printf '%s\n' \
-            "## 主要更新" "" "- 基于上游 EdgeEver v${base} 的二开版本（Windows x64、Linux x64 AppImage、macOS arm64/x64）。" "" \
-            "## Key Changes" "" "- Fork build of this repository, synced from upstream EdgeEver v${base} (Windows x64, Linux x64 AppImage, macOS arm64/x64).")"
+          # Which file to download per platform; the rest only serves installed apps.
+          notes="$(cat <<NOTES
+          ## 主要更新
+
+          - 基于上游 EdgeEver v${base} 的二开版本（Windows x64、Linux x64 AppImage、macOS arm64/x64、Android arm64）。
+
+          ## 下载
+
+          | 平台 | 文件 |
+          | --- | --- |
+          | Windows x64 | \`EdgeEver-${version}-windows-x64.exe\` |
+          | macOS（Apple 芯片） | \`EdgeEver-${version}-mac-arm64.dmg\` |
+          | macOS（Intel） | \`EdgeEver-${version}-mac-x64.dmg\` |
+          | Linux x64 | \`EdgeEver-${version}-linux-x64.AppImage\` |
+          | Android arm64 | \`EdgeEver-${version}-android-arm64.apk\`（首次安装需先卸载上游应用） |
+
+          其余文件（\`rc*.yml\`、\`latest-windows.json*\`、macOS 的 \`.zip\`、\`SHA256SUMS-*.txt\`）供已安装的桌面端自动更新和校验使用，无需下载。
+
+          ## Key Changes
+
+          - Fork build of this repository, synced from upstream EdgeEver v${base} (Windows x64, Linux x64 AppImage, macOS arm64/x64, Android arm64).
+
+          ## Downloads
+
+          | Platform | File |
+          | --- | --- |
+          | Windows x64 | \`EdgeEver-${version}-windows-x64.exe\` |
+          | macOS (Apple silicon) | \`EdgeEver-${version}-mac-arm64.dmg\` |
+          | macOS (Intel) | \`EdgeEver-${version}-mac-x64.dmg\` |
+          | Linux x64 | \`EdgeEver-${version}-linux-x64.AppImage\` |
+          | Android arm64 | \`EdgeEver-${version}-android-arm64.apk\` (uninstall the upstream app before the first install) |
+
+          The other files (\`rc*.yml\`, \`latest-windows.json*\`, the macOS \`.zip\` files, \`SHA256SUMS-*.txt\`) let installed desktop apps update and verify themselves; there is no need to download them.
+          NOTES
+          )"
           if gh release view "${TAG}" -R "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
             if [[ "$(gh release view "${TAG}" -R "${GITHUB_REPOSITORY}" --json isDraft --jq .isDraft)" != "true" ]]; then
               echo "::error::${TAG} is already published; a published release is never rebuilt."; exit 1
@@ -639,6 +753,8 @@ jobs:
         env:
           SIGNING_KEY_PEM: ${{ secrets.FORK_WINDOWS_UPDATE_SIGNING_KEY }}
           EDGE_EVER_WINDOWS_UPDATE_SIGNING_PASSPHRASE: ${{ secrets.FORK_WINDOWS_UPDATE_SIGNING_PASSPHRASE }}
+          # The audit re-checks the downloaded APK's signer with apksigner.
+          EDGE_EVER_ANDROID_ALLOWED_SIGNER_SHA256: ${{ vars.FORK_ANDROID_SIGNER_SHA256 }}
         run: |
           set -euo pipefail
           if [[ -z "${SIGNING_KEY_PEM}" ]]; then
@@ -651,5 +767,5 @@ jobs:
           {
             echo "### Published ${TAG}"
             echo
-            echo "Windows signed; Windows, Linux and macOS assets audited from a fresh download; published as a pre-release."
+            echo "Windows signed; Windows, Linux, macOS and Android assets audited from a fresh download; published as a pre-release."
           } >> "${GITHUB_STEP_SUMMARY}"

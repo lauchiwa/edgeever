@@ -15,6 +15,8 @@
 // its AppImage, rc-linux.yml and checksum list must agree with each other.
 // macOS apps were code-signed by the macos-sign job; here their zips, disk
 // images, rc-mac.yml and checksum list must agree (code signatures need macOS).
+// The Android APK must match its checksum list and, in CI, carry exactly the
+// fork's signer (apksigner).
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -24,6 +26,7 @@ import { fileURLToPath } from "node:url";
 import { FORK_REPOSITORY } from "../apps/desktop/src/main/fork-config.mjs";
 import { WINDOWS_UPDATE_MANIFEST_NAME, WINDOWS_UPDATE_SIGNATURE_NAME } from "../apps/desktop/src/main/windows-update-trust.mjs";
 import { WINDOWS_UPDATE_CHANNEL_FILE } from "./create-windows-update-metadata.mjs";
+import { androidReleaseAssetNames, defaultAndroidSignerCheck, verifyAndroidRelease } from "./fork-android-release.mjs";
 import { linuxReleaseAssetNames, verifyLinuxRelease } from "./fork-linux-release.mjs";
 import { macReleaseAssetNames, verifyMacRelease } from "./fork-macos-release.mjs";
 import { parseForkTag } from "./fork-release-version.mjs";
@@ -41,6 +44,7 @@ export const windowsReleaseAssetNames = (version) => [
 // Every asset of an unsigned Draft, as uploaded by fork-release.yml.
 export const releaseAssetNames = (version) => [
   ...windowsReleaseAssetNames(version), ...linuxReleaseAssetNames(version), ...macReleaseAssetNames(version),
+  ...androidReleaseAssetNames(version),
 ];
 
 const sha256 = (path) => createHash("sha256").update(readFileSync(path)).digest("hex");
@@ -71,6 +75,7 @@ export const signAndPublishRelease = async ({
   publish = false,
   resign = false,
   trustedPublicKeys,
+  checkAndroidSigner = defaultAndroidSignerCheck(),
   workDirectory = mkdtempSync(join(tmpdir(), "edgeever-fork-sign-")),
 }) => {
   const { version } = parseForkTag(tag);
@@ -80,6 +85,7 @@ export const signAndPublishRelease = async ({
   const windowsSigned = [...windowsUnsigned, WINDOWS_UPDATE_SIGNATURE_NAME];
   const linux = linuxReleaseAssetNames(version);
   const mac = macReleaseAssetNames(version);
+  const android = androidReleaseAssetNames(version);
   const keyOptions = trustedPublicKeys ? { trustedPublicKeys } : {};
   try {
     const release = gh.release(tag);
@@ -116,6 +122,7 @@ export const signAndPublishRelease = async ({
     gh.download(tag, windowsSigned, join(audit, "windows"));
     gh.download(tag, linux, join(audit, "linux"));
     gh.download(tag, mac, join(audit, "macos"));
+    gh.download(tag, android, join(audit, "android"));
     const verified = await verifyWindowsUpdateRelease(join(audit, "windows"), keyOptions);
     if (sign) {
       for (const name of windowsSigned) {
@@ -124,11 +131,13 @@ export const signAndPublishRelease = async ({
     }
     const linuxVerified = verifyLinuxRelease(join(audit, "linux"), version);
     const macVerified = verifyMacRelease(join(audit, "macos"), version);
+    const androidVerified = verifyAndroidRelease(join(audit, "android"), version, { checkSigner: checkAndroidSigner });
     if (publish) gh.publish(tag);
     return {
       tag, version, signed: sign, keyId: verified.keyId ?? keyId, installer: verified.file.name, sha256: verified.file.sha256,
       appImage: linuxVerified.file.name, appImageSha256: linuxVerified.file.sha256,
-      macAssets: macVerified.files.map(({ name, sha256: digest }) => ({ name, sha256: digest })), published: publish,
+      macAssets: macVerified.files.map(({ name, sha256: digest }) => ({ name, sha256: digest })),
+      apk: androidVerified.file.name, apkSha256: androidVerified.file.sha256, apkSigner: androidVerified.signerSha256, published: publish,
     };
   } finally {
     rmSync(workDirectory, { recursive: true, force: true });
