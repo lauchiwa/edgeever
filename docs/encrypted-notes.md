@@ -55,7 +55,7 @@ Limits:
 - The label and the rest of the note are plaintext.
 - AI and MCP cannot rewrite a whole note that contains secret blocks (409), but they can still change its title and tags.
 - Restoring a revision skips this guard, but the current version is saved first, so it can still be recovered.
-- The fork Android test build shows a secret block as its label and opens it read-only. Tapping the block opens a native dialog: enter the vault passphrase (once per vault session), then view or copy the text. The plaintext stays in that dialog and is dropped when it closes, the vault locks or the app goes to the background; it never reaches the editor WebView, the note or local storage. Editing or adding secret blocks needs Web or desktop, and the server rejects a save that drops or changes one. This has not been verified on a real device yet.
+- The fork Android test build shows a secret block as its label and opens it read-only. Tapping the block opens a native dialog: enter the vault passphrase (once per vault session), then view or copy the text. The plaintext stays in that dialog and is dropped when it closes, the vault locks or the app goes to the background; it never reaches the editor WebView, the note or local storage. Editing or adding secret blocks needs Web or desktop, and the server rejects a save that drops or changes one.
 
 ## Verification status
 
@@ -68,9 +68,11 @@ Automated tests cover:
 
 Verified by hand:
 - unlocking an encrypted note in the browser against a fork server (v1.120.0-rc.1);
-- the signed fork Android test build (1.120.0, `714a494`) on a real device: unlocking and reading notes created on other clients, edits made on Android syncing back to them, auto-lock after 15 idle minutes, the blocked image and attachment actions, and no upstream update prompt.
+- the signed fork Android test build (1.120.0, `714a494`) on a real device: unlocking and reading notes created on other clients, edits made on Android syncing back to them, auto-lock after 15 idle minutes, the blocked image and attachment actions, and no upstream update prompt;
+- inline secret blocks with the Windows desktop app and the signed Android test build (both v1.122.0-rc.2, `9d59be3`) against a fork server, Android on a real device: inserting a block on Windows, the label after sync on Android, unlocking with the vault passphrase, the wrong-passphrase message, copying, opening further blocks without the passphrase in the same vault session, and editing the rest of the note on Android with every block arriving intact and readable on Windows.
 
 Not yet verified:
 - the Windows desktop app end to end;
 - upgrading a real deployment from the upstream image;
-- the behaviour of upstream mobile apps on a real device.
+- the behaviour of upstream mobile apps on a real device;
+- one Android edit of a note with secret blocks stayed on "Saving" until the app was restarted. It did not happen again, also with logcat attached, and the cause is unknown.
