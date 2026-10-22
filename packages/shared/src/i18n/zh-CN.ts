@@ -223,6 +223,7 @@ export const zhCN = {
     sessionError: "无法开始编辑会话，请重试。",
     autoLocked: "长时间未操作，已自动锁定。",
     unsavedLost: "保险库在最后的修改保存前已锁定，解锁后将从上次保存的版本继续。",
+    locking: "正在保存并锁定…",
     readOnly: "只读",
     settingsGroup: "加密内容",
     autoLockTitle: "保险库自动锁定",
@@ -230,6 +231,7 @@ export const zhCN = {
     autoLockOption: "{{count}} 分钟",
   },
   secretBlock: {
+    draftLost: "保险库在这份草稿保存前已锁定，加密块保留上次保存的内容。",
     name: "加密块",
     defaultLabel: "密文",
     damaged: "此加密块已损坏，无法打开。",

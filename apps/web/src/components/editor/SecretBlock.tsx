@@ -18,6 +18,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   decryptSecretBlockWithVault,
   encryptSecretBlockWithVault,
+  isEncryptedNoteVaultSealing,
   isEncryptedNoteVaultUnlocked,
   registerEncryptedNoteVaultFlush,
   subscribeEncryptedNoteVault,
@@ -51,6 +52,8 @@ const SecretBlockView = ({ node, editor, getPos, updateAttributes, selected }: N
   const attributes = normalizeSecretBlockAttributes(node.attrs);
   const revealKey = attributes ? secretBlockRevealKey(attributes.id, attributes.envelope.cipher.iv) : "";
   const unlocked = useSyncExternalStore(subscribeEncryptedNoteVault, isEncryptedNoteVaultUnlocked);
+  // A lock that is still saving drafts already hides the plaintext.
+  const sealing = useSyncExternalStore(subscribeEncryptedNoteVault, isEncryptedNoteVaultSealing);
   const [text, setText] = useState<string | null>(() => (revealKey ? readRevealedSecret(revealKey) : null));
   const [askPassphrase, setAskPassphrase] = useState(false);
   const [passphrase, setPassphrase] = useState("");
@@ -70,11 +73,15 @@ const SecretBlockView = ({ node, editor, getPos, updateAttributes, selected }: N
   }, [revealKey]);
 
   // Locking the vault (manually or after inactivity) drops every plaintext copy.
+  // A draft still open here is one the lock could not save.
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
   useEffect(() => {
     if (unlocked) return;
+    if (draftRef.current) setError(t("secretBlock.draftLost"));
     setText(null);
     setDraft(null);
-  }, [unlocked]);
+  }, [unlocked, t]);
 
   // An open draft is sealed into the note before the vault locks, as if "Done" was pressed.
   const saveRef = useRef<() => Promise<void>>(async () => undefined);
@@ -163,13 +170,17 @@ const SecretBlockView = ({ node, editor, getPos, updateAttributes, selected }: N
       const envelope = await encryptSecretBlockWithVault(draft.text, attributes.envelope.kdf);
       const nextKey = secretBlockRevealKey(attributes.id, envelope.cipher.iv);
       forgetRevealedSecret(revealKey);
-      rememberRevealedSecret(nextKey, draft.text);
       shownKeyRef.current = nextKey;
-      setText(draft.text);
+      // A save that finishes after the lock keeps the ciphertext but not the plaintext.
+      if (isEncryptedNoteVaultUnlocked()) {
+        rememberRevealedSecret(nextKey, draft.text);
+        setText(draft.text);
+      }
       setDraft(null);
+      setError(null);
       updateAttributes({ label: nextLabel, envelope });
     } catch {
-      setError(isEncryptedNoteVaultUnlocked() ? t("secretBlock.saveError") : t("encryptedNote.autoLocked"));
+      setError(isEncryptedNoteVaultUnlocked() ? t("secretBlock.saveError") : t("secretBlock.draftLost"));
     } finally {
       setBusy(false);
     }
@@ -192,6 +203,10 @@ const SecretBlockView = ({ node, editor, getPos, updateAttributes, selected }: N
     }
   };
 
+  // While the vault is closing, nothing is shown even though the draft is kept for the save.
+  const shownText = sealing ? null : text;
+  const shownDraft = sealing ? null : draft;
+
   return (
     <NodeViewWrapper
       contentEditable={false}
@@ -201,7 +216,7 @@ const SecretBlockView = ({ node, editor, getPos, updateAttributes, selected }: N
       <div className="flex min-h-8 flex-wrap items-center gap-2" data-drag-handle>
         <LockKeyhole className="h-4 w-4 shrink-0 text-slate-500" aria-hidden="true" />
         <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-700">{label}</span>
-        {text !== null && !draft ? (
+        {shownText !== null && !shownDraft ? (
           <div className="flex items-center gap-1">
             <Button type="button" size="sm" variant="ghost" onClick={() => void copy()}>
               {copied ? <Check className="h-3.5 w-3.5" aria-hidden="true" /> : <Copy className="h-3.5 w-3.5" aria-hidden="true" />}
@@ -219,14 +234,14 @@ const SecretBlockView = ({ node, editor, getPos, updateAttributes, selected }: N
             </Button>
           </div>
         ) : null}
-        {text === null && !askPassphrase ? (
-          <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => void reveal()}>
+        {shownText === null && !askPassphrase ? (
+          <Button type="button" size="sm" variant="outline" disabled={busy || sealing} onClick={() => void reveal()}>
             {busy ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : null}
             {t("secretBlock.show")}
           </Button>
         ) : null}
       </div>
-      {text === null && askPassphrase ? (
+      {shownText === null && askPassphrase && !sealing ? (
         <form className="mt-2 flex flex-wrap items-center gap-2" onSubmit={(event) => void submitPassphrase(event)}>
           <label className="sr-only" htmlFor={`secret-block-passphrase-${attributes.id}`}>{t("encryptedNote.passphrase")}</label>
           <Input
@@ -249,14 +264,14 @@ const SecretBlockView = ({ node, editor, getPos, updateAttributes, selected }: N
           </Button>
         </form>
       ) : null}
-      {draft ? (
+      {shownDraft ? (
         <div className="mt-2 grid gap-2">
           <Input
             aria-label={t("secretBlock.label")}
             placeholder={t("secretBlock.labelPlaceholder")}
             maxLength={SECRET_BLOCK_LABEL_MAX_LENGTH}
-            value={draft.label}
-            onChange={(event) => changeDraft({ ...draft, label: event.target.value })}
+            value={shownDraft.label}
+            onChange={(event) => changeDraft({ ...shownDraft, label: event.target.value })}
             onKeyDown={onDraftKeyDown}
             disabled={busy}
           />
@@ -264,10 +279,10 @@ const SecretBlockView = ({ node, editor, getPos, updateAttributes, selected }: N
             {...SECRET_TEXT_INPUT_PROPS}
             aria-label={t("secretBlock.secret")}
             autoFocus
-            rows={Math.min(12, Math.max(3, draft.text.split("\n").length + 1))}
+            rows={Math.min(12, Math.max(3, shownDraft.text.split("\n").length + 1))}
             className="font-mono"
-            value={draft.text}
-            onChange={(event) => changeDraft({ ...draft, text: event.target.value })}
+            value={shownDraft.text}
+            onChange={(event) => changeDraft({ ...shownDraft, text: event.target.value })}
             onKeyDown={onDraftKeyDown}
             disabled={busy}
           />
@@ -279,8 +294,8 @@ const SecretBlockView = ({ node, editor, getPos, updateAttributes, selected }: N
             </Button>
           </div>
         </div>
-      ) : text !== null ? (
-        <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-all rounded-md bg-card px-3 py-2 font-mono text-sm text-slate-800">{text || " "}</pre>
+      ) : shownText !== null ? (
+        <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-all rounded-md bg-card px-3 py-2 font-mono text-sm text-slate-800">{shownText || " "}</pre>
       ) : null}
       {error ? <p role="alert" className="mt-2 text-xs text-destructive">{error}</p> : null}
     </NodeViewWrapper>

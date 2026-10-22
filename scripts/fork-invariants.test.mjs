@@ -190,10 +190,12 @@ describe("fork encrypted notes", () => {
     expect(read("apps/api/src/resource-service.ts")).toContain("await assertResourceTargetNotEncrypted(");
     expect(read("apps/api/src/resource-upload-service.ts")).toContain("await assertResourceTargetNotEncrypted(");
     expect(read("apps/api/src/mcp-tool-service.ts")).toContain("redactEncryptedNotesDeep(redactSecretBlocksDeep(");
+    expect(read("apps/api/src/memo-service.ts")).toContain("await encryptedNoteConversionError(db, id, current.content_markdown, contentMarkdown, hasDocumentUpdate);");
   });
 
-  test("the web vault closes with the workspace session", () => {
+  test("the vault closes with the workspace session", () => {
     expect(read("apps/web/src/components/WorkspaceApp.tsx")).toContain("useEffect(() => () => void flushAndLockEncryptedNoteVault(), [localDataScope]);");
+    expect(read("apps/mobile/src/screens/WorkspaceScreen.tsx")).toContain("useEffect(() => () => void mobileEncryptedNoteVault.flushAndLock(), [dataScope]);");
   });
 });
 

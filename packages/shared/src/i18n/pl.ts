@@ -212,6 +212,7 @@ export const pl = {
     sessionError: "Nie udało się rozpocząć sesji edycji. Spróbuj ponownie.",
     autoLocked: "Zablokowano po okresie bezczynności.",
     unsavedLost: "Sejf został zablokowany, zanim zapisano ostatnie zmiany. Odblokuj, aby kontynuować od ostatniej zapisanej wersji.",
+    locking: "Zapisywanie i blokowanie…",
     readOnly: "Tylko do odczytu",
     settingsGroup: "Zaszyfrowana zawartość",
     autoLockTitle: "Automatyczna blokada sejfu",
@@ -219,6 +220,7 @@ export const pl = {
     autoLockOption: "{{count}} min",
   },
   secretBlock: {
+    draftLost: "Sejf został zablokowany, zanim zapisano ten szkic. Blok zachowuje ostatnio zapisany sekret.",
     name: "Blok tajny",
     defaultLabel: "Sekret",
     damaged: "Ten blok tajny jest uszkodzony i nie można go otworzyć.",

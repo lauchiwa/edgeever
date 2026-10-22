@@ -223,6 +223,7 @@ export const enUS = {
     sessionError: "Could not start an editing session. Try again.",
     autoLocked: "Locked after inactivity.",
     unsavedLost: "The vault locked before your last changes could be saved. Unlock to continue from the last saved version.",
+    locking: "Saving and locking…",
     readOnly: "Read only",
     settingsGroup: "Encrypted content",
     autoLockTitle: "Auto-lock vault",
@@ -230,6 +231,7 @@ export const enUS = {
     autoLockOption: "{{count}} min",
   },
   secretBlock: {
+    draftLost: "The vault locked before this draft could be saved. The block keeps its last saved secret.",
     name: "Secret block",
     defaultLabel: "Secret",
     damaged: "This secret block is damaged and cannot be opened.",

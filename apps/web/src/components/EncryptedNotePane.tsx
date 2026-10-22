@@ -33,6 +33,7 @@ import {
   decryptWithEncryptedNoteVault,
   encryptWithEncryptedNoteVault,
   flushAndLockEncryptedNoteVault,
+  isEncryptedNoteVaultSealing,
   isEncryptedNoteVaultUnlocked,
   registerEncryptedNoteVaultFlush,
   subscribeEncryptedNoteVault,
@@ -150,6 +151,8 @@ export default function EncryptedNotePane({
 }: Props) {
   const { t } = useTranslation();
   const unlocked = useSyncExternalStore(subscribeEncryptedNoteVault, isEncryptedNoteVaultUnlocked);
+  // While a lock saves open edits the plaintext is already hidden and read-only.
+  const sealing = useSyncExternalStore(subscribeEncryptedNoteVault, isEncryptedNoteVaultSealing);
   const envelope = useMemo(() => parseEncryptedNoteEnvelope(memo.contentMarkdown), [memo.contentMarkdown]);
   const [doc, setDoc] = useState<TiptapDoc | null>(null);
   const [editorKey, setEditorKey] = useState(0);
@@ -179,9 +182,11 @@ export default function EncryptedNotePane({
   const saveRef = useRef<() => Promise<boolean>>(async () => false);
   // The in-flight save, so a flush before locking waits for it instead of skipping.
   const savingRef = useRef<Promise<boolean> | null>(null);
+  // The edit version that save captured, to tell whether it covers every edit.
+  const savingVersionRef = useRef(0);
   const notebookOptions = useMemo(() => getNotebookMoveOptions(notebooks), [notebooks]);
   const showEditor = unlocked && doc !== null;
-  const metadataDisabled = readOnly || !showEditor;
+  const metadataDisabled = readOnly || !showEditor || sealing;
 
   const markDirty = () => {
     editVersionRef.current += 1;
@@ -206,16 +211,35 @@ export default function EncryptedNotePane({
   // runs the flush below first, so only edits that could not be saved are lost.
   useEffect(() => {
     if (unlocked) return;
-    const lostEdits = dirtyRef.current && docRef.current !== null;
+    const hadEdits = dirtyRef.current && docRef.current !== null;
+    const inFlight = savingRef.current;
+    const coversEdits = inFlight !== null && savingVersionRef.current === editVersionRef.current;
     docRef.current = null;
     setDoc(null);
-    if (lostEdits) {
+    const settle = (saved: boolean) => {
+      if (saved) {
+        if (wasEncryptedNoteVaultAutoLocked()) setNotice(t("encryptedNote.autoLocked"));
+        return;
+      }
       dirtyRef.current = false;
       setDirty(false);
+      setError(null);
       setNotice(t("encryptedNote.unsavedLost"));
-    } else if (wasEncryptedNoteVaultAutoLocked()) {
-      setNotice(t("encryptedNote.autoLocked"));
+    };
+    if (!hadEdits) {
+      settle(true);
+      return;
     }
+    // A slow save that already holds every edit still lands after the lock; judge it when it settles.
+    if (!inFlight || !coversEdits) {
+      settle(false);
+      return;
+    }
+    let cancelled = false;
+    void inFlight.then((saved) => {
+      if (!cancelled) settle(saved);
+    });
+    return () => { cancelled = true; };
   }, [unlocked, t]);
 
   // An open vault session decrypts without asking again.
@@ -283,6 +307,7 @@ export default function EncryptedNotePane({
     if (readOnly || !dirtyRef.current || !ready || !sessionRef.current || !currentDoc || !envelope || contentError) return false;
     const currentMemo = memoRef.current;
     const version = editVersionRef.current;
+    savingVersionRef.current = version;
     setSaving(true);
     setError(null);
     try {
@@ -323,14 +348,18 @@ export default function EncryptedNotePane({
 
   // Seals the latest edits: waits for a running save, then saves what changed during it.
   const flushEdits = async () => {
-    if (savingRef.current) await savingRef.current;
-    if (dirtyRef.current) await saveRef.current();
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      if (savingRef.current) await savingRef.current;
+      if (!dirtyRef.current) return;
+      if (!(await saveRef.current())) return;
+    }
   };
   const flushRef = useRef(flushEdits);
   flushRef.current = flushEdits;
 
-  // Every lock (idle timeout, sign-out, another passphrase) saves first while the key is cached.
-  useEffect(() => registerEncryptedNoteVaultFlush(() => flushRef.current()), []);
+  // Every lock (idle timeout, sign-out, another passphrase) saves first while the
+  // key is cached, after the secret-block drafts are written into this note.
+  useEffect(() => registerEncryptedNoteVaultFlush(() => flushRef.current(), { afterEditors: true }), []);
 
   // Flush pending edits when switching notes.
   useEffect(() => () => {
@@ -437,7 +466,7 @@ export default function EncryptedNotePane({
           <div className="flex items-center gap-0.5">
             {showEditor ? (
               <IconTooltip label={t("encryptedNote.lock")}>
-                <Button type="button" variant="ghost" size="icon" onClick={() => void lockNow()} aria-label={t("encryptedNote.lock")}>
+                <Button type="button" variant="ghost" size="icon" disabled={sealing} onClick={() => void lockNow()} aria-label={t("encryptedNote.lock")}>
                   <Lock className="h-4 w-4" />
                 </Button>
               </IconTooltip>
@@ -447,7 +476,7 @@ export default function EncryptedNotePane({
               moreMenuClassName="w-48"
               onOpenExecutionCenter={onOpenExecutionCenter}
               moreMenuItems={(
-                <DropdownMenuItem disabled={!showEditor} onClick={() => void lockNow()}>
+                <DropdownMenuItem disabled={!showEditor || sealing} onClick={() => void lockNow()}>
                   <Lock className="h-4 w-4 text-slate-500" />
                   {t("encryptedNote.lock")}
                 </DropdownMenuItem>
@@ -460,7 +489,12 @@ export default function EncryptedNotePane({
     {error ? <p role="alert" className="border-b border-red-100 bg-red-50 px-5 py-2 text-sm text-red-700">{error}</p> : null}
     {notice && !error ? <p role="status" className="border-b border-slate-100 bg-slate-50 px-5 py-2 text-sm text-slate-600">{notice}</p> : null}
     <section className="min-h-0 flex-1 overflow-auto">
-      {showEditor ? (
+      {showEditor && sealing ? (
+        <div className="flex min-h-full items-center justify-center gap-2 p-6 text-sm text-slate-600" role="status">
+          <LoaderCircle className="h-4 w-4 animate-spin" aria-hidden="true" />
+          {t("encryptedNote.locking")}
+        </div>
+      ) : showEditor ? (
         <div className="mx-auto w-full max-w-3xl px-6 py-6">
           {contentError ? <p role="alert" className="mb-3 text-sm text-destructive">{t("encryptedNote.saveError")}</p> : null}
           <EncryptedNoteEditor

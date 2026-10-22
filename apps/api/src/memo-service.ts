@@ -25,7 +25,7 @@ import {
 import { auditStatement } from "./audit";
 import type { AppContext, AuditActor, AuthContext, Bindings } from "./api-context";
 import { AppError } from "./app-error";
-import { assertNotEncryptedNote, encryptedNoteUpdateError, redactEncryptedMemo, resolveEncryptedNoteContent } from "./encrypted-note-guard";
+import { assertNotEncryptedNote, encryptedNoteConversionError, encryptedNoteUpdateError, redactEncryptedMemo, resolveEncryptedNoteContent } from "./encrypted-note-guard";
 import { canonicalSecretBlockDoc, secretBlockUpdateError } from "./secret-block-guard";
 import { clampNumber, createId, isoNow, parseJsonArray } from "./entity-utils";
 import { workspaceInboxId } from "./notebook-service";
@@ -1355,6 +1355,9 @@ export const updateMemoRecord = async (
         : current.content_markdown;
   const encryptedUpdateError = encryptedNoteUpdateError(current.content_markdown, contentMarkdown, hasDocumentUpdate);
   if (encryptedUpdateError) return encryptedUpdateError;
+  // Fork: plaintext resources must not stay behind a newly encrypted note.
+  const encryptedConversionError = await encryptedNoteConversionError(db, id, current.content_markdown, contentMarkdown, hasDocumentUpdate);
+  if (encryptedConversionError) return encryptedConversionError;
   const encryptedContent = hasDocumentUpdate ? resolveEncryptedNoteContent(contentMarkdown) : null;
   if (encryptedContent?.error) return encryptedContent;
   const contentJson = encryptedContent?.contentJson

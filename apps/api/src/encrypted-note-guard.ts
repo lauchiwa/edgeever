@@ -80,6 +80,29 @@ export const assertResourceTargetNotEncrypted = async (db: DatabaseAdapter, work
   assertNotEncryptedNote(row?.content_markdown, "given images or attachments");
 };
 
+/**
+ * Turning an existing note into an encrypted one would leave its images and
+ * attachments behind as plaintext, so that conversion is refused while any remain.
+ */
+export const encryptedNoteConversionError = async (
+  db: DatabaseAdapter,
+  memoId: string,
+  currentMarkdown: string | null | undefined,
+  nextMarkdown: string,
+  hasDocumentUpdate: boolean,
+) => {
+  if (!hasDocumentUpdate || hasEncryptedNoteMarker(currentMarkdown) || !hasEncryptedNoteMarker(nextMarkdown)) return null;
+  const resource = await db.prepare("SELECT id FROM resources WHERE memo_id = ? AND is_deleted = 0 LIMIT 1")
+    .bind(memoId)
+    .first<{ id: string }>();
+  if (!resource) return null;
+  return {
+    error: "encrypted_note_unsupported",
+    message: "Notes with images or attachments cannot be turned into encrypted notes.",
+    status: 409,
+  } as const;
+};
+
 /** Every memo or revision shape returned to MCP gets the placeholder instead of the envelope. */
 export const redactEncryptedNotesDeep = <T>(value: T): T => {
   if (Array.isArray(value)) {

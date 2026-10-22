@@ -197,8 +197,35 @@ describe("mobile encrypted-note vault", () => {
     expect(await vault.unlock(otherNote, other)).toEqual(doc("other"));
     // The pending edit was sealed with the old passphrase, then the vault locked before switching.
     expect(await decryptNoteDoc(parseEncryptedNoteEnvelope(flushedWith)!, await deriveEncryptedNoteKey(PASSPHRASE, salt, ITERATIONS))).toEqual(doc("pending"));
-    expect(events).toEqual([false, true]);
+    // Sealing (still unlocked), locked, then the new session.
+    expect(events).toEqual([true, false, true]);
     expect(await vault.decrypt(await webEnvelope("a"))).toBeNull();
+  });
+
+  test("a sealing lock hides plaintext at once but lets the pending save use the key", async () => {
+    const vault = createEncryptedNoteVault(nodeProvider());
+    const note = await webEnvelope("a");
+    await vault.unlock(note, PASSPHRASE);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let sealed: string | null = null;
+    vault.registerFlush(async () => {
+      await gate;
+      sealed = (await vault.encrypt(doc("late edit"), { salt, iterations: ITERATIONS })).contentMarkdown;
+    });
+    const locking = vault.flushAndLock();
+    expect(vault.isSealing()).toBe(true);
+    expect(vault.isUnlocked()).toBe(true);
+    // Nothing new opens while closing.
+    expect(await vault.decrypt(note)).toBeNull();
+    // An unlock during the lock waits for it instead of being closed by it.
+    const reopening = vault.unlock(note, PASSPHRASE);
+    release();
+    await locking;
+    expect(await reopening).toEqual(doc("a"));
+    expect(vault.isSealing()).toBe(false);
+    expect(vault.isUnlocked()).toBe(true);
+    expect(await decryptNoteDoc(parseEncryptedNoteEnvelope(sealed)!, await deriveEncryptedNoteKey(PASSPHRASE, salt, ITERATIONS))).toEqual(doc("late edit"));
   });
 
   test("the idle timer itself locks the vault", async () => {

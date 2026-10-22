@@ -69,7 +69,7 @@ export const MobileSecretBlockModal = ({
 
   // Locking (manual, idle timeout, sign-out) or leaving the app drops the plaintext.
   useEffect(() => vault.subscribe(() => {
-    if (!vault.isUnlocked()) onClose();
+    if (!vault.isUnlocked() || vault.isSealing()) onClose();
   }), [onClose]);
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) => {

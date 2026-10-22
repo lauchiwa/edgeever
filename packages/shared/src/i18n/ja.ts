@@ -212,6 +212,7 @@ export const ja = {
     sessionError: "編集セッションを開始できませんでした。もう一度お試しください。",
     autoLocked: "一定時間操作がなかったためロックしました。",
     unsavedLost: "最後の変更を保存する前に保管庫がロックされました。ロックを解除すると、最後に保存した版から続けられます。",
+    locking: "保存してロックしています…",
     readOnly: "読み取り専用",
     settingsGroup: "暗号化コンテンツ",
     autoLockTitle: "保管庫の自動ロック",
@@ -219,6 +220,7 @@ export const ja = {
     autoLockOption: "{{count}} 分",
   },
   secretBlock: {
+    draftLost: "この下書きを保存する前に保管庫がロックされました。ブロックには最後に保存したシークレットが残ります。",
     name: "シークレットブロック",
     defaultLabel: "シークレット",
     damaged: "このシークレットブロックは破損しているため開けません。",

@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AppState, StyleSheet, View } from "react-native";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { AppState, Keyboard, StyleSheet, View } from "react-native";
 import { parseEncryptedNoteEnvelope, type MemoDetail, type TiptapDoc } from "@edgeever/shared";
 import { ActivityIndicator, LockKeyhole } from "../components/icons";
 import { Pressable, Text, TextInput } from "../components/LocalizedText";
@@ -11,6 +11,10 @@ import { mobileEncryptedNoteVault as vault } from "../lib/mobile-encrypted-note-
 import { shouldReloadEncryptedNote } from "../lib/mobile-encrypted-note";
 
 const SAVE_DEBOUNCE_MS = 800;
+
+const lostEditsMessage = (english: boolean) => english
+  ? "The vault locked before your last changes could be saved. Unlock to continue from the last saved version."
+  : "保险库在最后的修改保存前已锁定，解锁后将从上次保存的版本继续。";
 
 type Phase = "locked" | "unlocking" | "ready" | "invalid";
 type SaveState = "idle" | "pending" | "saving" | "saved" | "error";
@@ -36,6 +40,10 @@ export const MobileEncryptedNotePane = ({
   updateMutation: MobileMemoUpdateMutation;
 }) => {
   const english = locale !== "zh-CN";
+  const englishRef = useRef(english);
+  englishRef.current = english;
+  // While a lock saves open edits the plaintext is already covered and read-only.
+  const sealing = useSyncExternalStore(vault.subscribe, vault.isSealing);
   const envelope = useMemo(() => parseEncryptedNoteEnvelope(memo.contentMarkdown), [memo.contentMarkdown]);
   const [phase, setPhase] = useState<Phase>(envelope ? "locked" : "invalid");
   const [doc, setDoc] = useState<TiptapDoc | null>(null);
@@ -84,9 +92,14 @@ export const MobileEncryptedNotePane = ({
         await updateRef.current.mutateAsync({ memo: current, payload: { contentMarkdown } });
         setSaveStateSafe(pendingDocRef.current ? "pending" : "saved");
       } catch {
-        // Keep the edit so the next change or flush retries it.
-        pendingDocRef.current ??= next;
-        setSaveStateSafe("error");
+        if (vault.isUnlocked()) {
+          // Keep the edit so the next change or flush retries it.
+          pendingDocRef.current ??= next;
+          setSaveStateSafe("error");
+        } else if (mountedRef.current) {
+          // The lock already dropped the key: this edit cannot be sealed any more.
+          setUnlockError(lostEditsMessage(englishRef.current));
+        }
       }
     })();
     savingRef.current = run;
@@ -150,21 +163,19 @@ export const MobileEncryptedNotePane = ({
   useEffect(() => vault.registerFlush(flush), [flush]);
 
   // Locking (manual, idle timeout, sign-out) drops the plaintext, including edits
-  // that could not be saved: they cannot be encrypted any more.
+  // that could not be saved: they cannot be encrypted any more. A save still in
+  // flight reports for itself when it settles.
   useEffect(() => vault.subscribe(() => {
+    if (vault.isSealing()) Keyboard.dismiss();
     if (vault.isUnlocked()) return;
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = null;
     const lostEdits = pendingDocRef.current !== null;
     pendingDocRef.current = null;
-    if (lostEdits && mountedRef.current) {
-      setUnlockError(english
-        ? "The vault locked before your last changes could be saved. Unlock to continue from the last saved version."
-        : "保险库在最后的修改保存前已锁定，解锁后将从上次保存的版本继续。");
-    }
+    if (lostEdits && mountedRef.current) setUnlockError(lostEditsMessage(englishRef.current));
     setDoc(null);
     setPhase((current) => (current === "invalid" ? current : "locked"));
-  }), [english]);
+  }), []);
 
   // JS timers pause in the background; re-check the idle timeout on return.
   useEffect(() => {
@@ -209,10 +220,7 @@ export const MobileEncryptedNotePane = ({
     }, SAVE_DEBOUNCE_MS);
   }, [save]);
 
-  const lockNow = async () => {
-    await flush();
-    vault.lock();
-  };
+  const lockNow = () => vault.flushAndLock();
 
   const dom = useMemo(() => ({
     ...SAFE_DOM_WEBVIEW_PROPS,
@@ -285,7 +293,7 @@ export const MobileEncryptedNotePane = ({
       : saveState === "saved"
         ? (english ? "Encrypted and saved" : "已加密保存")
         : (english ? "Encrypted" : "已加密");
-  const editable = !readOnly && !contentError;
+  const editable = !readOnly && !contentError && !sealing;
 
   return (
     <View style={paneStyles.root}>
@@ -295,6 +303,8 @@ export const MobileEncryptedNotePane = ({
         <Pressable
           accessibilityLabel={english ? "Lock encrypted notes" : "锁定加密笔记"}
           accessibilityRole="button"
+          accessibilityState={{ disabled: sealing }}
+          disabled={sealing}
           hitSlop={6}
           onPress={() => void lockNow()}
           style={paneStyles.lockButton}
@@ -319,6 +329,13 @@ export const MobileEncryptedNotePane = ({
         onContentError={async () => setContentError(true)}
         theme={theme}
       />
+      {sealing ? (
+        // Covers the editor without unmounting it, so its last change still reaches the save.
+        <View accessibilityLiveRegion="polite" style={[paneStyles.sealing, theme === "dark" && paneStyles.sealingDark]}>
+          <ActivityIndicator color="#16A06E" size="small" />
+          <Text style={paneStyles.body}>{english ? "Saving and locking…" : "正在保存并锁定…"}</Text>
+        </View>
+      ) : null}
     </View>
   );
 };
@@ -361,4 +378,6 @@ const paneStyles = StyleSheet.create({
   notice: { color: "#92400e", fontSize: 13, lineHeight: 18, paddingHorizontal: 16, paddingBottom: 6 },
   editor: { backgroundColor: "#ffffff", flex: 1, minHeight: 0 },
   editorDark: { backgroundColor: "#0f172a" },
+  sealing: { ...StyleSheet.absoluteFill, alignItems: "center", backgroundColor: "#ffffff", gap: 10, justifyContent: "center" },
+  sealingDark: { backgroundColor: "#0f172a" },
 });
