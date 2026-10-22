@@ -46,7 +46,7 @@ import {
 import { cn } from "@/lib/utils";
 import { isBrowserOffline, isBrowserOnline } from "@/lib/network-status";
 import { ENCRYPTED_NOTE_PLACEHOLDER_TEXT, encryptedNotePlaceholderDoc, hasEncryptedNoteMarker } from "@edgeever/shared";
-import { encryptWithEncryptedNoteVault, isEncryptedNoteVaultUnlocked } from "@/lib/encrypted-note-vault";
+import { encryptWithEncryptedNoteVault, flushAndLockEncryptedNoteVault, isEncryptedNoteVaultUnlocked } from "@/lib/encrypted-note-vault";
 import { setSecretBlocksVaultScope } from "@/lib/secret-blocks";
 import { EncryptedNoteCreateDialog } from "./EncryptedNoteCreateDialog";
 import { createDefaultDiagramDocument, createDefaultInfographicDocument, hasPosterDocumentMarker, posterFallbackMarkdown, serializePosterDocument, createDefaultTableDocument, diagramFallbackMarkdown, getNotebookScopeIds, hasTableDocumentMarker, infographicFallbackMarkdown, markdownToDoc, parseDiagramDocument, parseInfographicDocument, parseTableDocument, serializeDiagramDocument, serializeInfographicDocument, serializeTableDocument, tableFallbackMarkdown, type NoteCreateKind, type Notebook, type AuthUser, type MemoSummary, type MemoDetail, type MemoTemplate as SavedMemoTemplate, getMemoDisplayTitle } from "@edgeever/shared";
@@ -207,6 +207,9 @@ export const WorkspaceApp = ({
     [user?.id]
   );
   setSecretBlocksVaultScope(localDataScope);
+  // Fork: sign-out, session expiry or another account closes the vault, so the
+  // next user never inherits the previous passphrase.
+  useEffect(() => () => void flushAndLockEncryptedNoteVault(), [localDataScope]);
   const repository = useMemo(() => createRepository(localDataScope), [localDataScope]);
   const isInitialSettingsRoute = route.isSettings;
   const isInitialPluginsRoute = route.isPlugins;

@@ -26,6 +26,8 @@ export type EncryptedNoteCryptoProvider = {
 };
 
 export const ENCRYPTED_NOTE_AUTO_LOCK_MS = ENCRYPTED_NOTE_DEFAULT_AUTO_LOCK_MINUTES * 60 * 1000;
+// A stuck save must not keep the vault open.
+const FLUSH_BEFORE_LOCK_TIMEOUT_MS = 10_000;
 
 export class EncryptedNoteWrongPassphraseError extends Error {
   constructor() {
@@ -66,6 +68,11 @@ export const createEncryptedNoteVault = (
     return key;
   };
 
+  // Open editors register a flush so a timed lock seals their unsaved plaintext
+  // with the current key first, instead of dropping it (mirror of web).
+  const flushers = new Set<() => Promise<unknown>>();
+  let flushing: Promise<void> | null = null;
+
   const lock = (byTimeout = false) => {
     if (autoLockTimer) clearTimeout(autoLockTimer);
     autoLockTimer = null;
@@ -76,11 +83,32 @@ export const createEncryptedNoteVault = (
     if (changed) notify();
   };
 
+  /** Runs every registered save while the key is still cached, then locks; without editors it locks at once. */
+  const flushAndLock = (byTimeout = false): Promise<void> => {
+    if (flushing) return flushing;
+    if (flushers.size === 0) {
+      lock(byTimeout);
+      return Promise.resolve();
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const pending = Promise.allSettled([...flushers].map((flush) => flush()));
+    const timeout = new Promise((resolve) => {
+      timer = setTimeout(resolve, FLUSH_BEFORE_LOCK_TIMEOUT_MS);
+    });
+    flushing = Promise.race([pending, timeout])
+      .then(() => lock(byTimeout))
+      .finally(() => {
+        clearTimeout(timer);
+        flushing = null;
+      });
+    return flushing;
+  };
+
   const touch = () => {
     if (!passphrase) return;
     lastActivity = now();
     if (autoLockTimer) clearTimeout(autoLockTimer);
-    autoLockTimer = setTimeout(() => lock(true), autoLockMs);
+    autoLockTimer = setTimeout(() => void flushAndLock(true), autoLockMs);
   };
 
   const open = async (envelope: EncryptedNoteEnvelope, key: string) =>
@@ -101,6 +129,9 @@ export const createEncryptedNoteVault = (
     } catch {
       throw new EncryptedNoteWrongPassphraseError();
     }
+    // A different passphrase first closes the current session, so nothing open
+    // under the old one is ever re-sealed with the new one.
+    if (passphrase !== null && secret !== passphrase) await flushAndLock(false);
     if (secret !== passphrase) keyCache.clear();
     passphrase = secret;
     keyCache.set(`${envelope.kdf.salt}:${envelope.kdf.iterations}`, key);
@@ -142,7 +173,15 @@ export const createEncryptedNoteVault = (
      * re-checked against the wall clock when the app returns to the foreground.
      */
     expireIfIdle: () => {
-      if (passphrase && now() - lastActivity >= autoLockMs) lock(true);
+      if (passphrase && now() - lastActivity >= autoLockMs) void flushAndLock(true);
+    },
+
+    /** Registers a save to run before a timed lock; returns the unregister function. */
+    registerFlush: (flush: () => Promise<unknown>) => {
+      flushers.add(flush);
+      return () => {
+        flushers.delete(flush);
+      };
     },
 
     /**
@@ -154,11 +193,11 @@ export const createEncryptedNoteVault = (
       if (!passphrase) return;
       const remaining = autoLockMs - (now() - lastActivity);
       if (remaining <= 0) {
-        lock(true);
+        void flushAndLock(true);
         return;
       }
       if (autoLockTimer) clearTimeout(autoLockTimer);
-      autoLockTimer = setTimeout(() => lock(true), remaining);
+      autoLockTimer = setTimeout(() => void flushAndLock(true), remaining);
     },
 
     /** Decrypts with a typed passphrase; on success it becomes the session passphrase. */

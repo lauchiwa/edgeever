@@ -222,6 +222,7 @@ export const zhCN = {
     saveError: "加密笔记保存失败，请重试。",
     sessionError: "无法开始编辑会话，请重试。",
     autoLocked: "长时间未操作，已自动锁定。",
+    unsavedLost: "保险库在最后的修改保存前已锁定，解锁后将从上次保存的版本继续。",
     readOnly: "只读",
     settingsGroup: "加密内容",
     autoLockTitle: "保险库自动锁定",

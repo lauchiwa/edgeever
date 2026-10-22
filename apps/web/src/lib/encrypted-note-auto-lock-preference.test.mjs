@@ -50,27 +50,53 @@ describe("encrypted note auto-lock preference", () => {
     expect(readEncryptedNoteAutoLockMinutes()).toBe(15);
   });
 
-  test("the vault timer follows the preference and restarts when it changes", async () => {
+  test("the vault deadline follows the preference and restarts when it changes", async () => {
     installWindow();
-    const { lockEncryptedNoteVault, openEncryptedNoteVault, setEncryptedNoteVaultAutoLockMinutes } = await import("./encrypted-note-vault.ts");
+    const {
+      checkEncryptedNoteVaultAutoLock,
+      isEncryptedNoteVaultUnlocked,
+      lockEncryptedNoteVault,
+      openEncryptedNoteVault,
+      setEncryptedNoteVaultAutoLockMinutes,
+      subscribeEncryptedNoteVault,
+    } = await import("./encrypted-note-vault.ts");
+    const realNow = Date.now;
     const realSetTimeout = globalThis.setTimeout;
-    const delays = [];
+    let now = realNow();
+    let armed = 0;
+    Date.now = () => now;
     globalThis.setTimeout = (handler, delay, ...args) => {
-      delays.push(delay);
+      armed += 1;
       return realSetTimeout(() => undefined, 0);
     };
     try {
       writeEncryptedNoteAutoLockMinutes(5);
       await openEncryptedNoteVault("auto-lock-test", "correct horse battery");
+      now += 2 * 60_000;
+      checkEncryptedNoteVaultAutoLock();
+      expect(isEncryptedNoteVaultUnlocked()).toBe(true);
+      // Changing the preference restarts the deadline from now.
       setEncryptedNoteVaultAutoLockMinutes(1);
-      expect(delays.slice(-2)).toEqual([5 * 60_000, 60_000]);
-      lockEncryptedNoteVault();
+      now += 59_000;
+      checkEncryptedNoteVaultAutoLock();
+      expect(isEncryptedNoteVaultUnlocked()).toBe(true);
+      const locked = new Promise((resolve) => {
+        const unsubscribe = subscribeEncryptedNoteVault(() => {
+          if (isEncryptedNoteVaultUnlocked()) return;
+          unsubscribe();
+          resolve();
+        });
+      });
+      now += 2_000;
+      checkEncryptedNoteVaultAutoLock();
+      await locked;
       // A locked vault does not arm a timer when the preference changes.
-      const armed = delays.length;
+      const armedBefore = armed;
       setEncryptedNoteVaultAutoLockMinutes(30);
-      expect(delays.length).toBe(armed);
+      expect(armed).toBe(armedBefore);
       expect(readEncryptedNoteAutoLockMinutes()).toBe(30);
     } finally {
+      Date.now = realNow;
       globalThis.setTimeout = realSetTimeout;
       lockEncryptedNoteVault();
     }

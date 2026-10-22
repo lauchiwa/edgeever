@@ -146,14 +146,25 @@ export const MobileEncryptedNotePane = ({
     };
   }, [envelope, memo.contentMarkdown, memo.revision, phase, showDoc]);
 
-  // Locking (manual, idle timeout, sign-out) drops the plaintext.
+  // An idle lock saves pending edits first, while the key is still cached.
+  useEffect(() => vault.registerFlush(flush), [flush]);
+
+  // Locking (manual, idle timeout, sign-out) drops the plaintext, including edits
+  // that could not be saved: they cannot be encrypted any more.
   useEffect(() => vault.subscribe(() => {
     if (vault.isUnlocked()) return;
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = null;
+    const lostEdits = pendingDocRef.current !== null;
+    pendingDocRef.current = null;
+    if (lostEdits && mountedRef.current) {
+      setUnlockError(english
+        ? "The vault locked before your last changes could be saved. Unlock to continue from the last saved version."
+        : "保险库在最后的修改保存前已锁定，解锁后将从上次保存的版本继续。");
+    }
     setDoc(null);
     setPhase((current) => (current === "invalid" ? current : "locked"));
-  }), []);
+  }), [english]);
 
   // JS timers pause in the background; re-check the idle timeout on return.
   useEffect(() => {

@@ -211,6 +211,7 @@ export const ja = {
     saveError: "暗号化ノートを保存できませんでした。もう一度お試しください。",
     sessionError: "編集セッションを開始できませんでした。もう一度お試しください。",
     autoLocked: "一定時間操作がなかったためロックしました。",
+    unsavedLost: "最後の変更を保存する前に保管庫がロックされました。ロックを解除すると、最後に保存した版から続けられます。",
     readOnly: "読み取り専用",
     settingsGroup: "暗号化コンテンツ",
     autoLockTitle: "保管庫の自動ロック",

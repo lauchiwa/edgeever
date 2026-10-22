@@ -222,6 +222,7 @@ export const enUS = {
     saveError: "Could not save the encrypted note. Try again.",
     sessionError: "Could not start an editing session. Try again.",
     autoLocked: "Locked after inactivity.",
+    unsavedLost: "The vault locked before your last changes could be saved. Unlock to continue from the last saved version.",
     readOnly: "Read only",
     settingsGroup: "Encrypted content",
     autoLockTitle: "Auto-lock vault",
