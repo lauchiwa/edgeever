@@ -195,6 +195,8 @@ describe("fork encrypted notes", () => {
 
   test("the vault closes with the workspace session", () => {
     expect(read("apps/web/src/components/WorkspaceApp.tsx")).toContain("useEffect(() => () => void flushAndLockEncryptedNoteVault(), [localDataScope]);");
+    // A desktop hibernate reload drops the vault; it must flush first.
+    expect(read("apps/web/src/components/WorkspaceApp.tsx")).toContain("onHibernatePrepare?.(() => flushAndLockEncryptedNoteVault())");
     expect(read("apps/mobile/src/screens/WorkspaceScreen.tsx")).toContain("useEffect(() => () => void mobileEncryptedNoteVault.flushAndLock(), [dataScope]);");
   });
 });

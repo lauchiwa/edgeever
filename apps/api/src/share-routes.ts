@@ -63,6 +63,8 @@ type SharedResourceRow = {
   byte_size: number;
   workspace_id: string;
   password_hash: string | null;
+  /** Null when the memo has no content row; such a memo cannot be an encrypted note. */
+  content_markdown: string | null;
 };
 
 const mapMemoShare = (row: MemoShareRow, password?: string): MemoShare => ({
@@ -261,14 +263,17 @@ export const registerPublicShareRoutes = (app: Hono<AppEnv>) => {
 
     const resource = await c.env.storage.db.prepare(
       `SELECT r.object_key, r.storage_config_id, r.kind, r.mime_type, r.filename, r.byte_size,
-              ms.workspace_id, ms.password_hash
+              ms.workspace_id, ms.password_hash, mc.content_markdown
        FROM memo_shares ms
        INNER JOIN memos m ON m.id = ms.memo_id AND m.workspace_id = ms.workspace_id
        INNER JOIN resources r ON r.memo_id = m.id
+       LEFT JOIN memo_contents mc ON mc.memo_id = m.id
        WHERE ms.token = ? AND r.id = ? AND m.is_deleted = 0 AND r.is_deleted = 0
        LIMIT 1`
     ).bind(token, c.req.param("resourceId")).first<SharedResourceRow>();
-    if (!resource) return notFound(c, "Shared resource not found");
+    // Fork: resources of an encrypted note may still be plaintext from before it
+    // was encrypted, so the share must not serve them.
+    if (!resource || isEncryptedNoteMarkdown(resource.content_markdown)) return notFound(c, "Shared resource not found");
     if (resource.password_hash && !(await allowPasswordProtectedShare(c, token, resource.password_hash))) {
       return sharePasswordRequired(c);
     }

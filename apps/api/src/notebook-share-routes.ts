@@ -327,14 +327,17 @@ export const registerPublicNotebookShareRoutes = (app: Hono<AppEnv>) => {
         .prepare(
           `${publicTreeSql}
       SELECT r.object_key, r.storage_config_id, r.kind, r.mime_type, r.filename, r.byte_size,
-        m.workspace_id, NULL AS password_hash
+        m.workspace_id, NULL AS password_hash, mc.content_markdown
       FROM resources r JOIN memos m ON r.memo_id = m.id
       JOIN tree t ON m.notebook_id = t.id AND m.workspace_id = t.workspace_id
+      LEFT JOIN memo_contents mc ON mc.memo_id = m.id
       WHERE r.id = ? AND r.is_deleted = 0 AND m.is_deleted = 0`,
         )
         .bind(token, c.req.param("resourceId"))
         .first<Parameters<typeof serveSharedResource>[1]>();
-      if (!resource) return notFound(c, "Shared resource not found");
+      // Fork: resources of an encrypted note may still be plaintext from before it
+      // was encrypted, so the share must not serve them.
+      if (!resource || isEncryptedNoteMarkdown(resource.content_markdown)) return notFound(c, "Shared resource not found");
       return serveSharedResource(c, resource);
     },
   );

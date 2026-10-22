@@ -210,6 +210,9 @@ export const WorkspaceApp = ({
   // Fork: sign-out, session expiry or another account closes the vault, so the
   // next user never inherits the previous passphrase.
   useEffect(() => () => void flushAndLockEncryptedNoteVault(), [localDataScope]);
+  // Fork: the desktop reloads a hibernated renderer, which drops the in-memory
+  // vault without running the lock; seal open edits before that reload.
+  useEffect(() => window.edgeeverDesktop?.onHibernatePrepare?.(() => flushAndLockEncryptedNoteVault()), []);
   const repository = useMemo(() => createRepository(localDataScope), [localDataScope]);
   const isInitialSettingsRoute = route.isSettings;
   const isInitialPluginsRoute = route.isPlugins;
