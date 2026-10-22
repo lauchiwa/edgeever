@@ -176,6 +176,11 @@ describe("encrypted note server guard", () => {
       expect(sqlite.query("SELECT COUNT(*) AS count FROM resources WHERE memo_id = ?").get(encrypted.id).count).toBe(0);
       expect(sqlite.query("SELECT COUNT(*) AS count FROM resource_uploads WHERE memo_id = ?").get(encrypted.id).count).toBe(0);
       expect((await upload(plain.id)).memoId).toBe(plain.id);
+
+      // Encrypting a note that already has an attachment would leave that file as plaintext.
+      const converted = await updateMemoRecord(ctx.db, ctx.workspaceId, plain.id, { contentMarkdown: await sealed("now secret") }, actor, "owner");
+      expect(converted).toMatchObject({ error: "encrypted_note_unsupported", status: 409 });
+      expect(parseEncryptedNoteEnvelope(storedRow({ sqlite }, plain.id).content_markdown)).toBeNull();
     } finally {
       sqlite.close();
       rmSync(directory, { recursive: true, force: true });

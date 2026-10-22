@@ -9,6 +9,9 @@ Encrypted notes are opt-in. The client encrypts the note body before saving it, 
 - One vault passphrase is shared by all encrypted notes and secret blocks. Once one of them is unlocked, the others open without asking again until the vault locks. Each device keeps a small encrypted verifier in local storage that catches a mistyped passphrase when you create a note. It is per device and does not sync.
 - Locking neither drops edits nor mixes passphrases.
   - Before the vault locks, open notes and secret-block drafts that are not yet confirmed with "Done" are saved with the current key. Changes that cannot be saved are dropped, with a notice.
+  - While those saves run, the body and secret blocks are hidden and read-only right away and the pane shows "Saving and locking…"; the passphrase is cleared once they finish. On a slow network an already encrypted save still completes after the lock, and only changes that really were not saved are reported as lost.
+  - Manual lock, the idle timeout, switching account or server, and signing out on Android all follow this order.
+  - Before the desktop runtime reloads a window it put to sleep in the background, open edits are saved the same way, and the window comes back with the vault locked.
   - Typing in a secret-block draft counts as activity.
   - The idle timeout follows the wall clock. Time the computer spends asleep, or a tab spends in the background, still counts, and the vault locks as soon as the window comes back if the timeout has passed.
   - Signing out, an expired session or switching accounts locks the vault.
@@ -29,6 +32,8 @@ A server built from this fork:
 - rejects any write that would drop an encrypted envelope (409 `encrypted_update_required`), including revision restore;
 - refuses merge and share for encrypted notes;
 - refuses images and attachments for encrypted notes (409 `encrypted_note_unsupported`) on single and multipart uploads, MCP and table forms, because attachments are stored as plaintext;
+- refuses to turn a note that already has images or attachments into an encrypted note (409 `encrypted_note_unsupported`), since those files would stay behind it as plaintext;
+- does not serve a shared memo's or shared notebook's resources when the note is encrypted, so files left behind by a note that became encrypted before that check existed stay private;
 - returns only placeholders to MCP, including revision lists, restore previews and update results;
 - advertises `features.encryptedNotes` in `/api/v1/auth/session`.
 

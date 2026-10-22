@@ -200,6 +200,16 @@ describe("live recursive notebook sharing", () => {
     expect((await request()).status).toBe(404);
   });
 
+  test("does not serve resources left behind by a note that became encrypted", async () => {
+    const { db, request, blobReads } = fixture();
+    db.run(
+      "UPDATE memo_contents SET content_markdown = ? WHERE memo_id = 'memo_child'",
+      ["<!-- edgeever-encrypted-v1:abc -->"],
+    );
+    expect((await request("/resources/res_memo_child/blob")).status).toBe(404);
+    expect(blobReads()).toBe(0);
+  });
+
   test("revocation closes every endpoint, keeps independent shares, and recreation gets a fresh token", async () => {
     const { db, app, environment, request } = fixture();
     const revoke = await app.request(

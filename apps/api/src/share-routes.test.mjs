@@ -268,6 +268,30 @@ describe("public memo shares", () => {
     sqlite.close();
   });
 
+  test("does not serve resources left behind by a note that became encrypted", async () => {
+    const { sqlite, environment } = createDatabaseEnvironment();
+    sqlite.query(
+      `INSERT INTO resources (id, memo_id, object_key, kind, mime_type, filename, byte_size)
+       VALUES (?, ?, ?, 'attachment', 'application/pdf', 'report.pdf', 10)`,
+    ).run("res_shared", "memo_source", "shared-key");
+    sqlite.query("UPDATE memo_contents SET content_markdown = ? WHERE memo_id = ?")
+      .run("<!-- edgeever-encrypted-v1:abc -->", "memo_source");
+    let blobReads = 0;
+    environment.storage.resources = { get: async () => { blobReads += 1; return null; } };
+    const app = new Hono();
+    registerPublicShareRoutes(app);
+
+    const response = await app.request(
+      `/api/public/shares/${sourceToken}/resources/res_shared/blob`,
+      {},
+      environment,
+    );
+
+    expect(response.status).toBe(404);
+    expect(blobReads).toBe(0);
+    sqlite.close();
+  });
+
   test("serves filename-detected shared audio inline", async () => {
     const { sqlite, environment } = createDatabaseEnvironment();
     sqlite.query(

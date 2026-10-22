@@ -2,8 +2,10 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { decryptNoteDoc, deriveEncryptedNoteKey, encryptNoteDoc, parseEncryptedNoteEnvelope } from "@edgeever/shared";
 import {
   checkEncryptedNoteVaultAutoLock,
+  decryptWithEncryptedNoteVault,
   encryptWithEncryptedNoteVault,
   flushAndLockEncryptedNoteVault,
+  isEncryptedNoteVaultSealing,
   isEncryptedNoteVaultUnlocked,
   lockEncryptedNoteVault,
   openEncryptedNoteVault,
@@ -41,6 +43,46 @@ describe("encrypted note vault locking", () => {
     expect(await opensWith(saved, "first passphrase")).toEqual(doc("unsaved edit"));
   });
 
+  test("a sealing lock hides plaintext at once but lets the pending save use the key", async () => {
+    await openEncryptedNoteVault("lock-test", "first passphrase");
+    const note = await sealedWith("first passphrase", "note");
+    let release;
+    const gate = new Promise((resolve) => { release = resolve; });
+    // A failed assertion must not leave the lock waiting on this gate for later tests.
+    cleanups.push(() => release());
+    let sealed = null;
+    cleanups.push(registerEncryptedNoteVaultFlush(async () => {
+      await gate;
+      sealed = (await encryptWithEncryptedNoteVault(doc("late edit"), { salt, iterations: ITERATIONS })).contentMarkdown;
+    }));
+    const locking = flushAndLockEncryptedNoteVault();
+    expect(isEncryptedNoteVaultSealing()).toBe(true);
+    expect(isEncryptedNoteVaultUnlocked()).toBe(true);
+    // Nothing new opens while closing.
+    expect(await decryptWithEncryptedNoteVault(note)).toBeNull();
+    // An unlock during the lock waits for it instead of being closed by it.
+    const reopening = unlockEncryptedNote("lock-test", note, "first passphrase");
+    release();
+    await locking;
+    expect(await reopening).toEqual(doc("note"));
+    expect(isEncryptedNoteVaultSealing()).toBe(false);
+    expect(isEncryptedNoteVaultUnlocked()).toBe(true);
+    expect(await opensWith(sealed, "first passphrase")).toEqual(doc("late edit"));
+  });
+
+  test("a note is sealed after the drafts it contains have been written into it", async () => {
+    await openEncryptedNoteVault("lock-test", "first passphrase");
+    const order = [];
+    // Registered first, but the note must still be saved last.
+    cleanups.push(registerEncryptedNoteVaultFlush(async () => { order.push("note"); }, { afterEditors: true }));
+    cleanups.push(registerEncryptedNoteVaultFlush(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      order.push("block");
+    }));
+    await flushAndLockEncryptedNoteVault();
+    expect(order).toEqual(["block", "note"]);
+  });
+
   test("a failing save still locks the vault", async () => {
     await openEncryptedNoteVault("lock-test", "first passphrase");
     cleanups.push(registerEncryptedNoteVaultFlush(async () => { throw new Error("offline"); }));
@@ -60,7 +102,8 @@ describe("encrypted note vault locking", () => {
 
     expect(await unlockEncryptedNote("lock-test", await sealedWith("second passphrase", "note B"), "second passphrase")).toEqual(doc("note B"));
     expect(await opensWith(flushed, "first passphrase")).toEqual(doc("note A edit"));
-    expect(states).toEqual([false, true]);
+    // Sealing (still unlocked), locked, then the new session.
+    expect(states).toEqual([true, false, true]);
     const next = await encryptWithEncryptedNoteVault(doc("new"), { salt, iterations: ITERATIONS });
     expect(await opensWith(next.contentMarkdown, "second passphrase")).toEqual(doc("new"));
   });

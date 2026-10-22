@@ -72,11 +72,15 @@ export const createEncryptedNoteVault = (
   // with the current key first, instead of dropping it (mirror of web).
   const flushers = new Set<() => Promise<unknown>>();
   let flushing: Promise<void> | null = null;
+  // True while a lock waits for those saves: the key stays usable for them, but
+  // every view hides its plaintext and stops taking edits right away.
+  let sealing = false;
 
   const lock = (byTimeout = false) => {
     if (autoLockTimer) clearTimeout(autoLockTimer);
     autoLockTimer = null;
-    const changed = passphrase !== null || lockedByTimeout !== byTimeout;
+    const changed = passphrase !== null || lockedByTimeout !== byTimeout || sealing;
+    sealing = false;
     passphrase = null;
     keyCache.clear();
     lockedByTimeout = byTimeout;
@@ -86,7 +90,7 @@ export const createEncryptedNoteVault = (
   /** Runs every registered save while the key is still cached, then locks; without editors it locks at once. */
   const flushAndLock = (byTimeout = false): Promise<void> => {
     if (flushing) return flushing;
-    if (flushers.size === 0) {
+    if (!passphrase || flushers.size === 0) {
       lock(byTimeout);
       return Promise.resolve();
     }
@@ -95,6 +99,8 @@ export const createEncryptedNoteVault = (
     const timeout = new Promise((resolve) => {
       timer = setTimeout(resolve, FLUSH_BEFORE_LOCK_TIMEOUT_MS);
     });
+    sealing = true;
+    notify();
     flushing = Promise.race([pending, timeout])
       .then(() => lock(byTimeout))
       .finally(() => {
@@ -129,6 +135,8 @@ export const createEncryptedNoteVault = (
     } catch {
       throw new EncryptedNoteWrongPassphraseError();
     }
+    // A lock already under way finishes first, so it cannot close the new session.
+    if (flushing) await flushing;
     // A different passphrase first closes the current session, so nothing open
     // under the old one is ever re-sealed with the new one.
     if (passphrase !== null && secret !== passphrase) await flushAndLock(false);
@@ -146,7 +154,8 @@ export const createEncryptedNoteVault = (
     read: (envelope: EncryptedNoteEnvelope, key: string) => Promise<T>,
   ) => {
     const secret = passphrase;
-    if (!secret) return null;
+    // A closing session opens nothing new.
+    if (!secret || sealing) return null;
     try {
       const value = await read(envelope, await sessionKey(secret, envelope.kdf.salt, envelope.kdf.iterations));
       touch();
@@ -158,8 +167,12 @@ export const createEncryptedNoteVault = (
 
   return {
     isUnlocked: () => passphrase !== null,
+    /** True while a lock is saving open edits; views must already hide plaintext. */
+    isSealing: () => sealing,
     wasAutoLocked: () => lockedByTimeout,
     lock: () => lock(false),
+    /** Saves open editors with the current key, then locks (manual lock, sign-out). */
+    flushAndLock: () => flushAndLock(false),
     touch,
     subscribe: (listener: () => void) => {
       listeners.add(listener);

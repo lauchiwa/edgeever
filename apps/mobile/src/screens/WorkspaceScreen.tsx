@@ -145,8 +145,9 @@ export const WorkspaceScreen = ({
   const safeAreaInsets = useSafeAreaInsets();
   const syncQueueScope = session?.baseUrl ?? "";
   const dataScope = createMobileDataScope(session?.baseUrl ?? "", session?.user?.id);
-  // The vault passphrase belongs to one account; drop it on sign-out or account switch.
-  useEffect(() => () => mobileEncryptedNoteVault.lock(), [dataScope]);
+  // The vault passphrase belongs to one account; drop it on sign-out or account
+  // switch, after open encrypted notes save their last edits with it.
+  useEffect(() => () => void mobileEncryptedNoteVault.flushAndLock(), [dataScope]);
   const [activeView, setActiveView] = useState<MobileView>("notes");
   const [activeNotebookId, setActiveNotebookId] = useState<string>(ALL_NOTES_ID);
   const autoSelectedDemoNotebookRef = useRef(false);
