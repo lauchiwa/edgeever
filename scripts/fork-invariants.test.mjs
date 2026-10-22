@@ -183,6 +183,20 @@ describe("fork Android app", () => {
   });
 });
 
+describe("fork encrypted notes", () => {
+  // Uploads are plaintext and MCP output reaches third-party agents, so these
+  // hooks in upstream files must survive syncs.
+  test("server refuses uploads to encrypted notes and redacts every MCP result", () => {
+    expect(read("apps/api/src/resource-service.ts")).toContain("await assertResourceTargetNotEncrypted(");
+    expect(read("apps/api/src/resource-upload-service.ts")).toContain("await assertResourceTargetNotEncrypted(");
+    expect(read("apps/api/src/mcp-tool-service.ts")).toContain("redactEncryptedNotesDeep(redactSecretBlocksDeep(");
+  });
+
+  test("the web vault closes with the workspace session", () => {
+    expect(read("apps/web/src/components/WorkspaceApp.tsx")).toContain("useEffect(() => () => void flushAndLockEncryptedNoteVault(), [localDataScope]);");
+  });
+});
+
 describe("fork inline secret blocks", () => {
   // Each hook keeps ciphertext stored as a code block, guarded on save, or
   // out of shares, agents and AI. Losing one on an upstream sync leaks or drops secrets.

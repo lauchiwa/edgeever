@@ -7,6 +7,12 @@ Encrypted notes are opt-in. The client encrypts the note body before saving it, 
 - The body is encrypted in the Web/desktop client with WebCrypto. The key is derived with PBKDF2-SHA256 (600,000 iterations, a fresh salt per note) and the body is sealed with AES-256-GCM (a fresh IV on every save). The passphrase and derived keys stay in memory only. The vault locks after a period of inactivity (5 minutes by default; choose 1, 5, 15 or 30 under Settings → General → Encrypted content, stored per device and never synced), or when you lock it manually.
 - Storage reuses the existing columns, so no migration is needed. `content_markdown` holds a placeholder line plus an `<!-- edgeever-encrypted-v1:… -->` envelope. `content_json` and `content_text` only hold the placeholder "🔒 Encrypted note", so search, excerpts, AI and MCP see nothing else.
 - One vault passphrase is shared by all encrypted notes and secret blocks. Once one of them is unlocked, the others open without asking again until the vault locks. Each device keeps a small encrypted verifier in local storage that catches a mistyped passphrase when you create a note. It is per device and does not sync.
+- Locking neither drops edits nor mixes passphrases.
+  - Before the vault locks, open notes and secret-block drafts that are not yet confirmed with "Done" are saved with the current key. Changes that cannot be saved are dropped, with a notice.
+  - Typing in a secret-block draft counts as activity.
+  - The idle timeout follows the wall clock. Time the computer spends asleep, or a tab spends in the background, still counts, and the vault locks as soon as the window comes back if the timeout has passed.
+  - Signing out, an expired session or switching accounts locks the vault.
+  - Unlocking with another passphrase first saves and locks the current session, then switches. Nothing that is open is ever re-sealed with the new passphrase.
 
 ## Deliberate limits
 
@@ -22,7 +28,8 @@ Encrypted notes are opt-in. The client encrypts the note body before saving it, 
 A server built from this fork:
 - rejects any write that would drop an encrypted envelope (409 `encrypted_update_required`), including revision restore;
 - refuses merge and share for encrypted notes;
-- returns only placeholders to MCP;
+- refuses images and attachments for encrypted notes (409 `encrypted_note_unsupported`) on single and multipart uploads, MCP and table forms, because attachments are stored as plaintext;
+- returns only placeholders to MCP, including revision lists, restore previews and update results;
 - advertises `features.encryptedNotes` in `/api/v1/auth/session`.
 
 The client offers encrypted notes only when the server advertises that capability.

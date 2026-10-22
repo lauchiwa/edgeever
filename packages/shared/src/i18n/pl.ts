@@ -211,6 +211,7 @@ export const pl = {
     saveError: "Nie udało się zapisać zaszyfrowanej notatki. Spróbuj ponownie.",
     sessionError: "Nie udało się rozpocząć sesji edycji. Spróbuj ponownie.",
     autoLocked: "Zablokowano po okresie bezczynności.",
+    unsavedLost: "Sejf został zablokowany, zanim zapisano ostatnie zmiany. Odblokuj, aby kontynuować od ostatniej zapisanej wersji.",
     readOnly: "Tylko do odczytu",
     settingsGroup: "Zaszyfrowana zawartość",
     autoLockTitle: "Automatyczna blokada sejfu",

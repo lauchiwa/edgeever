@@ -1,6 +1,8 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
-import { globSync, readFileSync } from "node:fs";
+import { globSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   ENCRYPTED_NOTE_PLACEHOLDER_TEXT,
   createEncryptedNoteSalt,
@@ -12,6 +14,10 @@ import {
 } from "@edgeever/shared";
 import { createMemoRecord, getMemoDetail, getMemoDetailRow, listMemosForMcp, mergeMemosRecord, updateMemoRecord } from "./memo-service.ts";
 import { restoreMemoRevision } from "./memo-revision-service.ts";
+import { redactEncryptedNotesDeep } from "./encrypted-note-guard.ts";
+import { createAttachmentResource } from "./resource-service.ts";
+import { initiateResourceUpload } from "./resource-upload-service.ts";
+import { createSelfHostedStorageAdapter } from "./self-hosted-storage-adapter.ts";
 
 class Statement {
   constructor(sqlite, sql, bindings = []) {
@@ -147,6 +153,49 @@ describe("encrypted note server guard", () => {
     await expect(mergeMemosRecord(ctx.db, ctx.workspaceId, { memoIds: [plain.id, encrypted.id] }, actor, "owner"))
       .rejects.toMatchObject({ code: "encrypted_note_unsupported" });
     ctx.sqlite.close();
+  });
+
+  // Fork: uploads are plaintext, so none may attach to an encrypted note.
+  test("single and multipart uploads to an encrypted note are refused, plain notes still accept them", async () => {
+    const sqlite = new Database(":memory:");
+    for (const path of globSync("migrations/*.sql").sort()) sqlite.exec(readFileSync(path, "utf8"));
+    const directory = mkdtempSync(join(tmpdir(), "edgeever-encrypted-upload-"));
+    try {
+      const storage = createSelfHostedStorageAdapter(sqlite, directory);
+      const seed = sqlite.query("SELECT workspace_id, notebook_id FROM memos WHERE is_deleted = 0 ORDER BY id LIMIT 1").get();
+      const ctx = { db: storage.db, workspaceId: seed.workspace_id, notebookId: seed.notebook_id };
+      const auth = { kind: "user", actorType: "user", actorId: "user_owner", scopes: [], workspaceId: ctx.workspaceId, role: "owner" };
+      const context = { env: { storage }, get: (key) => (key === "auth" ? auth : undefined) };
+      const encrypted = await createEncrypted(ctx);
+      const plain = await createMemoRecord(ctx.db, ctx.workspaceId, { notebookId: ctx.notebookId, title: "Plain", contentMarkdown: "Hello" }, actor, "owner");
+      const upload = (memoId) => createAttachmentResource(context, { memoId, filename: "plan.txt", mimeType: "text/plain", bytes: new TextEncoder().encode("plaintext"), actor });
+
+      await expect(upload(encrypted.id)).rejects.toMatchObject({ code: "encrypted_note_unsupported", status: 409 });
+      await expect(initiateResourceUpload(context, { memoId: encrypted.id, filename: "big.bin", mimeType: "application/octet-stream", byteSize: 10 * 1024 * 1024 }))
+        .rejects.toMatchObject({ code: "encrypted_note_unsupported", status: 409 });
+      expect(sqlite.query("SELECT COUNT(*) AS count FROM resources WHERE memo_id = ?").get(encrypted.id).count).toBe(0);
+      expect(sqlite.query("SELECT COUNT(*) AS count FROM resource_uploads WHERE memo_id = ?").get(encrypted.id).count).toBe(0);
+      expect((await upload(plain.id)).memoId).toBe(plain.id);
+    } finally {
+      sqlite.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("MCP results of every shape carry the placeholder instead of the envelope", async () => {
+    const markdown = await sealed("deep secret");
+    const result = redactEncryptedNotesDeep({
+      revisions: [{ id: "rev_1", title: "Vault", contentMarkdown: markdown, contentText: "🔒 Encrypted note" }],
+      dryRun: true,
+      revision: { contentMarkdown: markdown },
+      memo: { title: "Vault", contentMarkdown: markdown, contentJson: { type: "doc" }, contentText: "x" },
+      plain: { contentMarkdown: "Hello" },
+    });
+    expect(JSON.stringify(result)).not.toContain("edgeever-encrypted-v1");
+    expect(result.revisions[0]).toMatchObject({ id: "rev_1", title: "Vault", contentMarkdown: ENCRYPTED_NOTE_PLACEHOLDER_TEXT, encrypted: true });
+    expect(result.revision).toEqual({ contentMarkdown: ENCRYPTED_NOTE_PLACEHOLDER_TEXT, encrypted: true });
+    expect(result.memo.contentText).toBe(ENCRYPTED_NOTE_PLACEHOLDER_TEXT);
+    expect(result.plain).toEqual({ contentMarkdown: "Hello" });
   });
 
   test("MCP list with content does not expose the envelope", async () => {

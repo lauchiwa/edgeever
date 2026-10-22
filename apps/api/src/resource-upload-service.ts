@@ -7,6 +7,7 @@ import {
 import { auditStatement } from "./audit";
 import type { AppContext, AuditActor } from "./api-context";
 import { AppError } from "./app-error";
+import { assertResourceTargetNotEncrypted } from "./encrypted-note-guard";
 import { createId, isoNow } from "./entity-utils";
 import { resolveObjectStorage } from "./object-storage";
 import {
@@ -117,6 +118,8 @@ export const initiateResourceUpload = async (
   const uploadId = createId("upload");
   const resourceId = createId("res");
   const workspaceId = getWorkspaceId(context);
+  // Fork: plaintext uploads never attach to an encrypted note.
+  await assertResourceTargetNotEncrypted(context.env.storage.db, workspaceId, input.memoId);
   const filename = normalizeFilename(input.filename) || resourceId;
   const extension = kind === "image" ? inferImageExtension(filename, input.mimeType) : "";
   const objectKey = `workspaces/${workspaceId}/memos/${input.memoId}/${resourceId}${extension}`;

@@ -47,11 +47,37 @@ const keyFor = (secret: string, salt: string, iterations: number) => {
   return key;
 };
 
+// The idle deadline is wall-clock time: timers stall while the machine sleeps
+// and are throttled in background tabs, so the timer only re-checks in short
+// steps and waking up (focus / visible / pageshow) checks right away.
+const AUTO_LOCK_CHECK_INTERVAL_MS = 15_000;
+let autoLockDeadline = 0;
+
+const scheduleAutoLockCheck = () => {
+  if (autoLockTimer) clearTimeout(autoLockTimer);
+  autoLockTimer = setTimeout(checkEncryptedNoteVaultAutoLock, Math.max(0, Math.min(autoLockDeadline - Date.now(), AUTO_LOCK_CHECK_INTERVAL_MS)));
+};
+
+/** Locks the vault if the idle deadline has passed, otherwise keeps waiting for it. */
+export const checkEncryptedNoteVaultAutoLock = () => {
+  if (!passphrase || flushing) return;
+  if (Date.now() >= autoLockDeadline) void flushAndLockEncryptedNoteVault(true);
+  else scheduleAutoLockCheck();
+};
+
 export const touchEncryptedNoteVault = () => {
   if (!passphrase) return;
-  if (autoLockTimer) clearTimeout(autoLockTimer);
-  autoLockTimer = setTimeout(() => lockEncryptedNoteVault(true), readEncryptedNoteAutoLockMinutes() * 60 * 1000);
+  autoLockDeadline = Date.now() + readEncryptedNoteAutoLockMinutes() * 60 * 1000;
+  scheduleAutoLockCheck();
 };
+
+if (typeof window !== "undefined" && typeof window.addEventListener === "function" && typeof document !== "undefined") {
+  window.addEventListener("focus", checkEncryptedNoteVaultAutoLock);
+  window.addEventListener("pageshow", checkEncryptedNoteVaultAutoLock);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") checkEncryptedNoteVaultAutoLock();
+  });
+}
 
 /** Saves the idle timeout and restarts an open session's timer with it. */
 export const setEncryptedNoteVaultAutoLockMinutes = (minutes: EncryptedNoteAutoLockMinutes) => {
@@ -59,7 +85,44 @@ export const setEncryptedNoteVaultAutoLockMinutes = (minutes: EncryptedNoteAutoL
   touchEncryptedNoteVault();
 };
 
-const setSessionPassphrase = (next: string) => {
+// Open editors register a flush so a lock seals their unsaved plaintext with
+// the current key first, instead of dropping it.
+const flushers = new Set<() => Promise<unknown>>();
+const FLUSH_BEFORE_LOCK_TIMEOUT_MS = 10_000;
+let flushing: Promise<void> | null = null;
+
+/** Registers a save to run before the vault locks; returns the unregister function. */
+export const registerEncryptedNoteVaultFlush = (flush: () => Promise<unknown>) => {
+  flushers.add(flush);
+  return () => {
+    flushers.delete(flush);
+  };
+};
+
+/** Runs every registered save while the key is still available, then locks. A stuck save cannot keep the vault open. */
+export const flushAndLockEncryptedNoteVault = (byTimeout = false): Promise<void> => {
+  if (flushing) return flushing;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const pending = Promise.allSettled([...flushers].map((flush) => flush()));
+  const timeout = new Promise((resolve) => {
+    timer = setTimeout(resolve, FLUSH_BEFORE_LOCK_TIMEOUT_MS);
+  });
+  flushing = Promise.race([pending, timeout])
+    .then(() => lockEncryptedNoteVault(byTimeout))
+    .finally(() => {
+      clearTimeout(timer);
+      flushing = null;
+    });
+  return flushing;
+};
+
+/**
+ * Starts the session with a passphrase that just opened something. A different
+ * passphrase first closes the current session, so nothing open under the old
+ * one is ever re-sealed with the new one.
+ */
+const startSession = async (next: string) => {
+  if (passphrase !== null && next !== passphrase) await flushAndLockEncryptedNoteVault();
   if (next !== passphrase) keyCache.clear();
   passphrase = next;
   lockedByTimeout = false;
@@ -122,7 +185,7 @@ export const verifyEncryptedNoteVaultPassphrase = async (scope: string, secret: 
 /** Starts a vault session with an already-verified passphrase (used when creating a note). */
 export const openEncryptedNoteVault = async (scope: string, secret: string) => {
   if (!readVerifier(scope)) await writeVerifier(scope, secret);
-  setSessionPassphrase(secret);
+  await startSession(secret);
 };
 
 /** Decrypts with the session passphrase. Returns null when locked or when the session passphrase does not fit this note. */
@@ -141,7 +204,7 @@ export const decryptWithEncryptedNoteVault = async (envelope: EncryptedNoteEnvel
 /** Decrypts with a typed passphrase; on success it becomes the session passphrase. Throws on a wrong passphrase. */
 export const unlockEncryptedNote = async (scope: string, envelope: EncryptedNoteEnvelope, secret: string) => {
   const doc = await decryptNoteDoc(envelope, await deriveEncryptedNoteKey(secret, envelope.kdf.salt, envelope.kdf.iterations));
-  setSessionPassphrase(secret);
+  await startSession(secret);
   if (!readVerifier(scope)) await writeVerifier(scope, secret);
   return doc;
 };
@@ -178,7 +241,7 @@ export const decryptSecretBlockWithVault = async (envelope: EncryptedNoteEnvelop
 /** Opens a secret block with a typed passphrase; on success it becomes the session passphrase. Throws on a wrong one. */
 export const unlockSecretBlock = async (scope: string, envelope: EncryptedNoteEnvelope, secret: string) => {
   const text = await decryptSecretBlockText(envelope, await deriveEncryptedNoteKey(secret, envelope.kdf.salt, envelope.kdf.iterations));
-  setSessionPassphrase(secret);
+  await startSession(secret);
   if (!readVerifier(scope)) await writeVerifier(scope, secret);
   return text;
 };

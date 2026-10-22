@@ -19,7 +19,9 @@ import {
   decryptSecretBlockWithVault,
   encryptSecretBlockWithVault,
   isEncryptedNoteVaultUnlocked,
+  registerEncryptedNoteVaultFlush,
   subscribeEncryptedNoteVault,
+  touchEncryptedNoteVault,
   unlockSecretBlock,
 } from "@/lib/encrypted-note-vault";
 import {
@@ -73,6 +75,11 @@ const SecretBlockView = ({ node, editor, getPos, updateAttributes, selected }: N
     setText(null);
     setDraft(null);
   }, [unlocked]);
+
+  // An open draft is sealed into the note before the vault locks, as if "Done" was pressed.
+  const saveRef = useRef<() => Promise<void>>(async () => undefined);
+  const hasDraft = draft !== null;
+  useEffect(() => (hasDraft ? registerEncryptedNoteVaultFlush(() => saveRef.current()) : undefined), [hasDraft]);
 
   if (!attributes) {
     return <NodeViewWrapper contentEditable={false} className="edgeever-secret-block my-3 rounded-lg border border-dashed border-slate-300 px-3 py-2 text-sm text-slate-500">{t("secretBlock.damaged")}</NodeViewWrapper>;
@@ -168,6 +175,13 @@ const SecretBlockView = ({ node, editor, getPos, updateAttributes, selected }: N
     }
   };
 
+  const changeDraft = (next: { label: string; text: string }) => {
+    setDraft(next);
+    touchEncryptedNoteVault();
+  };
+
+  saveRef.current = save;
+
   const onDraftKeyDown = (event: KeyboardEvent) => {
     if (event.key === "Escape") {
       event.preventDefault();
@@ -242,7 +256,7 @@ const SecretBlockView = ({ node, editor, getPos, updateAttributes, selected }: N
             placeholder={t("secretBlock.labelPlaceholder")}
             maxLength={SECRET_BLOCK_LABEL_MAX_LENGTH}
             value={draft.label}
-            onChange={(event) => setDraft({ ...draft, label: event.target.value })}
+            onChange={(event) => changeDraft({ ...draft, label: event.target.value })}
             onKeyDown={onDraftKeyDown}
             disabled={busy}
           />
@@ -253,7 +267,7 @@ const SecretBlockView = ({ node, editor, getPos, updateAttributes, selected }: N
             rows={Math.min(12, Math.max(3, draft.text.split("\n").length + 1))}
             className="font-mono"
             value={draft.text}
-            onChange={(event) => setDraft({ ...draft, text: event.target.value })}
+            onChange={(event) => changeDraft({ ...draft, text: event.target.value })}
             onKeyDown={onDraftKeyDown}
             disabled={busy}
           />

@@ -32,8 +32,9 @@ import { EdgeEverCodeBlock, codeBlockLowlight } from "@/lib/code-block";
 import {
   decryptWithEncryptedNoteVault,
   encryptWithEncryptedNoteVault,
+  flushAndLockEncryptedNoteVault,
   isEncryptedNoteVaultUnlocked,
-  lockEncryptedNoteVault,
+  registerEncryptedNoteVaultFlush,
   subscribeEncryptedNoteVault,
   touchEncryptedNoteVault,
   unlockEncryptedNote,
@@ -106,6 +107,14 @@ const EncryptedNoteEditor = ({
       attributes: {
         class: "edgeever-note-rich-editor prose prose-slate max-w-none focus:outline-none min-h-[240px]",
         "aria-label": "Encrypted note content",
+        // Keeps spellcheck services and writing extensions away from the plaintext, like secret blocks.
+        spellcheck: "false",
+        autocorrect: "off",
+        autocapitalize: "off",
+        "data-gramm": "false",
+        "data-gramm_editor": "false",
+        "data-enable-grammarly": "false",
+        "data-lt-active": "false",
       },
       handlePaste: (_view, event) => {
         if (!hasFiles(event.clipboardData)) return false;
@@ -168,6 +177,8 @@ export default function EncryptedNotePane({
   const savedMarkdownRef = useRef(memo.contentMarkdown);
   const dirtyRef = useRef(false);
   const saveRef = useRef<() => Promise<boolean>>(async () => false);
+  // The in-flight save, so a flush before locking waits for it instead of skipping.
+  const savingRef = useRef<Promise<boolean> | null>(null);
   const notebookOptions = useMemo(() => getNotebookMoveOptions(notebooks), [notebooks]);
   const showEditor = unlocked && doc !== null;
   const metadataDisabled = readOnly || !showEditor;
@@ -191,12 +202,20 @@ export default function EncryptedNotePane({
     setSessionNonce((value) => value + 1);
   }, [memo]);
 
-  // Locking (manual or idle timeout) drops the plaintext from memory.
+  // Locking (manual or idle timeout) drops the plaintext from memory. The vault
+  // runs the flush below first, so only edits that could not be saved are lost.
   useEffect(() => {
     if (unlocked) return;
+    const lostEdits = dirtyRef.current && docRef.current !== null;
     docRef.current = null;
     setDoc(null);
-    if (wasEncryptedNoteVaultAutoLocked()) setNotice(t("encryptedNote.autoLocked"));
+    if (lostEdits) {
+      dirtyRef.current = false;
+      setDirty(false);
+      setNotice(t("encryptedNote.unsavedLost"));
+    } else if (wasEncryptedNoteVaultAutoLocked()) {
+      setNotice(t("encryptedNote.autoLocked"));
+    }
   }, [unlocked, t]);
 
   // An open vault session decrypts without asking again.
@@ -250,9 +269,18 @@ export default function EncryptedNotePane({
     }
   };
 
-  const save = async () => {
+  const save = (): Promise<boolean> => {
+    if (savingRef.current) return savingRef.current;
+    const run = saveNow().finally(() => {
+      savingRef.current = null;
+    });
+    savingRef.current = run;
+    return run;
+  };
+
+  const saveNow = async () => {
     const currentDoc = docRef.current;
-    if (readOnly || saving || !dirtyRef.current || !ready || !sessionRef.current || !currentDoc || !envelope || contentError) return false;
+    if (readOnly || !dirtyRef.current || !ready || !sessionRef.current || !currentDoc || !envelope || contentError) return false;
     const currentMemo = memoRef.current;
     const version = editVersionRef.current;
     setSaving(true);
@@ -293,15 +321,23 @@ export default function EncryptedNotePane({
     return () => window.clearTimeout(timer);
   }, [dirty, ready, readOnly, saving, showEditor, title, tagsText]);
 
+  // Seals the latest edits: waits for a running save, then saves what changed during it.
+  const flushEdits = async () => {
+    if (savingRef.current) await savingRef.current;
+    if (dirtyRef.current) await saveRef.current();
+  };
+  const flushRef = useRef(flushEdits);
+  flushRef.current = flushEdits;
+
+  // Every lock (idle timeout, sign-out, another passphrase) saves first while the key is cached.
+  useEffect(() => registerEncryptedNoteVaultFlush(() => flushRef.current()), []);
+
   // Flush pending edits when switching notes.
   useEffect(() => () => {
-    if (dirtyRef.current) void saveRef.current();
+    void flushRef.current();
   }, []);
 
-  const lockNow = async () => {
-    if (dirtyRef.current) await saveRef.current();
-    lockEncryptedNoteVault();
-  };
+  const lockNow = () => flushAndLockEncryptedNoteVault();
   const handleNotebookChange = (notebookId: string) => {
     const currentMemo = memoRef.current;
     if (readOnly || notebookUpdatePending || notebookId === currentMemo.notebookId) {

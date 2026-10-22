@@ -6,6 +6,7 @@ import {
   type TiptapDoc,
 } from "@edgeever/shared";
 import { AppError } from "./app-error";
+import type { DatabaseAdapter } from "./storage-contract";
 
 // Fork feature: client-side encrypted notes. Kept in its own module so the
 // hooks in upstream files stay one-liners.
@@ -64,4 +65,44 @@ export const assertNotEncryptedNote =(markdown: string | null | undefined, actio
   if (hasEncryptedNoteMarker(markdown)) {
     throw new AppError("encrypted_note_unsupported", `Encrypted notes cannot be ${action}.`, 409);
   }
+};
+
+/**
+ * Uploads are stored as plaintext, so they must never attach to an encrypted
+ * note (REST, multipart, MCP, table forms). A missing memo is left to the caller.
+ */
+export const assertResourceTargetNotEncrypted = async (db: DatabaseAdapter, workspaceId: string, memoId: string) => {
+  const row = await db.prepare(
+    `SELECT mc.content_markdown FROM memo_contents mc
+     INNER JOIN memos m ON m.id = mc.memo_id
+     WHERE mc.memo_id = ? AND m.workspace_id = ? LIMIT 1`,
+  ).bind(memoId, workspaceId).first<{ content_markdown: string | null }>();
+  assertNotEncryptedNote(row?.content_markdown, "given images or attachments");
+};
+
+/** Every memo or revision shape returned to MCP gets the placeholder instead of the envelope. */
+export const redactEncryptedNotesDeep = <T>(value: T): T => {
+  if (Array.isArray(value)) {
+    const next = value.map((item) => redactEncryptedNotesDeep(item));
+    return (next.some((item, index) => item !== value[index]) ? next : value) as T;
+  }
+  if (!value || typeof value !== "object") return value;
+  const record = value as Record<string, unknown>;
+  if (typeof record.contentMarkdown === "string" && hasEncryptedNoteMarker(record.contentMarkdown)) {
+    return {
+      ...record,
+      contentMarkdown: ENCRYPTED_NOTE_PLACEHOLDER_TEXT,
+      ...("contentJson" in record ? { contentJson: encryptedNotePlaceholderDoc() } : {}),
+      ...("contentText" in record ? { contentText: ENCRYPTED_NOTE_PLACEHOLDER_TEXT } : {}),
+      encrypted: true,
+    } as T;
+  }
+  let changed = false;
+  const next: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(record)) {
+    const redacted = redactEncryptedNotesDeep(child);
+    if (redacted !== child) changed = true;
+    next[key] = redacted;
+  }
+  return (changed ? next : value) as T;
 };

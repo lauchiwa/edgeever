@@ -2,7 +2,7 @@ import { requestPosterRender, readPosterRenderJob, posterRenderJob } from "./pos
 import { applyPosterEdits, compilePosterMemo, posterCapabilities } from "./mcp-poster-tools";
 import { resolveObjectStorage } from "./object-storage";
 import { hasPosterDocumentMarker, parsePosterDocument, serializePosterDocument } from "@edgeever/shared";
-import { isEncryptedNoteMarkdown, redactEncryptedMemo } from "./encrypted-note-guard";
+import { isEncryptedNoteMarkdown, redactEncryptedMemo, redactEncryptedNotesDeep } from "./encrypted-note-guard";
 import { redactSecretBlocksDeep } from "./secret-block-guard";
 import {
   AiPromptTemplateCreateSchema,
@@ -1288,6 +1288,6 @@ const callMcpToolUnredacted = async (
   }
 };
 
-/** Agents never receive secret block ciphertext, whichever tool returns note content. */
+/** Agents never receive encrypted-note or secret block ciphertext, whichever tool returns note content. */
 export const callMcpTool = async (...args: Parameters<typeof callMcpToolUnredacted>) =>
-  redactSecretBlocksDeep(await callMcpToolUnredacted(...args));
+  redactEncryptedNotesDeep(redactSecretBlocksDeep(await callMcpToolUnredacted(...args)));

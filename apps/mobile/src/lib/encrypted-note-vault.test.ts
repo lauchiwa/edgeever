@@ -161,6 +161,46 @@ describe("mobile encrypted-note vault", () => {
     expect(vault.isUnlocked()).toBe(false);
   });
 
+  test("an idle lock runs the registered saves with the key before dropping it", async () => {
+    let clock = 1_000;
+    const vault = createEncryptedNoteVault(nodeProvider(), { autoLockMs: 60_000, now: () => clock });
+    await vault.unlock(await webEnvelope("a"), PASSPHRASE);
+    let sealedWhileOpen: string | null = null;
+    const unregister = vault.registerFlush(async () => {
+      sealedWhileOpen = (await vault.encrypt(doc("unsaved edit"), { salt, iterations: ITERATIONS })).contentMarkdown;
+    });
+    clock += 60_000;
+    vault.expireIfIdle();
+    // The save still sees an open vault; the lock waits for it.
+    expect(vault.isUnlocked()).toBe(true);
+    for (let i = 0; i < 50 && vault.isUnlocked(); i += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(vault.isUnlocked()).toBe(false);
+    expect(vault.wasAutoLocked()).toBe(true);
+    const reopened = parseEncryptedNoteEnvelope(sealedWhileOpen);
+    const key = await deriveEncryptedNoteKey(PASSPHRASE, salt, ITERATIONS);
+    expect(await decryptNoteDoc(reopened!, key)).toEqual(doc("unsaved edit"));
+    unregister();
+  });
+
+  test("unlocking with another passphrase closes the open session first", async () => {
+    const other = "a different passphrase";
+    const otherKey = await deriveEncryptedNoteKey(other, salt, ITERATIONS);
+    const otherNote = await encryptNoteDoc(doc("other"), otherKey, { salt, iterations: ITERATIONS });
+    const vault = createEncryptedNoteVault(nodeProvider());
+    await vault.unlock(await webEnvelope("a"), PASSPHRASE);
+    const events: boolean[] = [];
+    vault.subscribe(() => events.push(vault.isUnlocked()));
+    let flushedWith: string | null = null;
+    vault.registerFlush(async () => {
+      flushedWith = (await vault.encrypt(doc("pending"), { salt, iterations: ITERATIONS })).contentMarkdown;
+    });
+    expect(await vault.unlock(otherNote, other)).toEqual(doc("other"));
+    // The pending edit was sealed with the old passphrase, then the vault locked before switching.
+    expect(await decryptNoteDoc(parseEncryptedNoteEnvelope(flushedWith)!, await deriveEncryptedNoteKey(PASSPHRASE, salt, ITERATIONS))).toEqual(doc("pending"));
+    expect(events).toEqual([false, true]);
+    expect(await vault.decrypt(await webEnvelope("a"))).toBeNull();
+  });
+
   test("the idle timer itself locks the vault", async () => {
     const vault = createEncryptedNoteVault(nodeProvider(), { autoLockMs: 20 });
     await vault.unlock(await webEnvelope("a"), PASSPHRASE);
