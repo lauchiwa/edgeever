@@ -627,28 +627,28 @@ describe("ACP spawn and failure mapping", () => {
   test("adds node tool directories so a Dock-launched agent can exec npx", async () => {
     const workspace = await mkdtemp(path.join(tmpdir(), "edgeever-acp-path-"));
     const homeDir = "/Users/example";
-    const nvmBin = path.join(homeDir, ".nvm", "versions", "node", "v22.14.0", "bin");
-    const present = new Set(["/opt/homebrew/bin", path.join(homeDir, ".volta", "bin"), nvmBin]);
+    const nvmBin = path.posix.join(homeDir, ".nvm", "versions", "node", "v22.14.0", "bin");
+    const present = new Set(["/opt/homebrew/bin", path.posix.join(homeDir, ".volta", "bin"), nvmBin]);
     const deps = {
       platform: "darwin",
       home: homeDir,
       env: { PATH: "/usr/bin:/bin", HOME: homeDir },
       exists: (dir) => present.has(dir),
       readFile: (file) => {
-        if (file === path.join(homeDir, ".nvm", "alias", "default")) return "v22.14.0\n";
+        if (file === path.posix.join(homeDir, ".nvm", "alias", "default")) return "v22.14.0\n";
         throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
       },
     };
     try {
       const plan = createAcpSpawnPlan("/Applications/Antigravity.app/Contents/MacOS/Antigravity", workspace, deps);
       expect(plan.options.shell).toBe(false);
-      expect(plan.options.env.PATH).toBe(`/opt/homebrew/bin:${path.join(homeDir, ".volta", "bin")}:${nvmBin}:/usr/bin:/bin`);
+      expect(plan.options.env.PATH).toBe(`/opt/homebrew/bin:${path.posix.join(homeDir, ".volta", "bin")}:${nvmBin}:/usr/bin:/bin`);
       const narrowed = createAcpSpawnPlan({
         command: "/bin/openclaw",
         args: ["acp"],
         env: { PATH: "/custom/bin:/opt/homebrew/bin" },
       }, workspace, deps);
-      expect(narrowed.options.env.PATH).toBe(`${path.join(homeDir, ".volta", "bin")}:${nvmBin}:/custom/bin:/opt/homebrew/bin`);
+      expect(narrowed.options.env.PATH).toBe(`${path.posix.join(homeDir, ".volta", "bin")}:${nvmBin}:/custom/bin:/opt/homebrew/bin`);
       expect(desktopToolPath({
         platform: "darwin",
         home: homeDir,
@@ -656,14 +656,14 @@ describe("ACP spawn and failure mapping", () => {
         exists: () => true,
         readFile: () => "lts/*",
       })).toBe([
-        path.join(homeDir, ".local", "bin"),
+        path.posix.join(homeDir, ".local", "bin"),
         "/opt/homebrew/bin",
         "/usr/local/bin",
-        path.join(homeDir, ".volta", "bin"),
-        path.join(homeDir, ".asdf", "shims"),
-        path.join(homeDir, ".fnm", "aliases", "default", "bin"),
-        path.join(homeDir, "Library", "Application Support", "fnm", "aliases", "default", "bin"),
-        path.join(homeDir, ".local", "share", "mise", "shims"),
+        path.posix.join(homeDir, ".volta", "bin"),
+        path.posix.join(homeDir, ".asdf", "shims"),
+        path.posix.join(homeDir, ".fnm", "aliases", "default", "bin"),
+        path.posix.join(homeDir, "Library", "Application Support", "fnm", "aliases", "default", "bin"),
+        path.posix.join(homeDir, ".local", "share", "mise", "shims"),
         "/usr/bin",
       ].join(":"));
       expect(desktopToolPath({

@@ -1094,7 +1094,7 @@ export function createAcpHostRuntime(options = {}) {
         const connected = await withHandshakeTimeout((signal) => connect(
           spec.command, () => requestRef.id, sink, signal, undefined,
           mcpBridge ? [mcpServerFor(mcpBridge)] : [], true, null, spec.verifyWorkBuddy,
-        ), spec.timeoutMs);
+        ), adapterTimeout(spec.adapterId));
         spec.rememberPromptStatus({
           state: "available",
           authMethods: connected.authMethods,
@@ -1332,7 +1332,7 @@ export function createAcpHostRuntime(options = {}) {
           access,
           verifyWorkBuddy: input.adapterId === "workbuddyCn" || input.adapterId === "workbuddyIntl",
           rememberPromptStatus,
-          timeoutMs: adapterTimeout(input.adapterId),
+          adapterId: input.adapterId,
         }));
         return { ready: true };
       } catch {
@@ -1408,7 +1408,7 @@ export function createAcpHostRuntime(options = {}) {
       if (!warm && key) {
         const pending = preparing.get(key) ?? startWarmSession(key, {
           command: resolved.command, wantsNotes, access, verifyWorkBuddy, rememberPromptStatus,
-          timeoutMs: adapterTimeout(input.adapterId),
+          adapterId: input.adapterId,
         });
         try {
           warm = await pending;

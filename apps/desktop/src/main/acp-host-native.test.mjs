@@ -100,7 +100,7 @@ test("every connection attempt passes an explicit timeout", async () => {
   // withHandshakeTimeout has no default: a call without one would abort at once.
   const source = await readFile(new URL("./acp-host.mjs", import.meta.url), "utf8");
   const calls = source.split("await withHandshakeTimeout(").slice(1);
-  expect(calls.length).toBe(5);
+  expect(calls.length).toBe(6);
   for (const call of calls) {
     let depth = 1;
     let end = 0;
