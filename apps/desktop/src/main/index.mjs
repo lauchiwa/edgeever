@@ -30,6 +30,7 @@ import {
   mountedInstallerCandidates,
 } from "./installation-location.mjs";
 import { userDataDirectoryFromArguments } from "./user-data-directory.mjs";
+import { PRINT_PDF_OPTIONS } from "./print-pdf.mjs";
 import { isAllowedAppNavigation, isAllowedPrintPreviewUrl, isResourceDownloadUrl } from "./window-open-policy.mjs";
 import { showWindow } from "./window-visibility.mjs";
 import { globalShortcutAccelerator, normalizeGlobalShortcutBinding, replaceGlobalShortcut, toggleMainWindow } from "./global-shortcut.mjs";
@@ -44,6 +45,7 @@ import { createRendererStartupGuard } from "./renderer-startup-guard.mjs";
 import { waitForChildProcessSpawn } from "./child-process-start.mjs";
 import { ScheduledTaskScheduler } from "./scheduled-task-scheduler.mjs";
 import { desktopMenuCopy } from "./desktop-menu.mjs";
+import { createHeadingShortcutGuard } from "./heading-shortcut.mjs";
 import { buildEditContextMenuTemplate } from "./edit-context-menu.mjs";
 import {
   fetchTrustedWindowsUpdate,
@@ -61,6 +63,11 @@ import { createAcpPathStore, validateTrustedAcpPath } from "./acp-path-store.mjs
 import { createAcpHostRuntime, registerAcpIpc } from "./acp-host.mjs";
 import { shouldQuitAfterAllWindowsClosed } from "./window-lifecycle.mjs";
 import {
+  commandLineOpensContent,
+  createLoginItemController,
+  shouldStartHidden,
+} from "./login-item.mjs";
+import {
   RENDERER_HIBERNATE_PREPARE_TIMEOUT_MS,
   createRendererHibernateController,
   workingSetBytesFromProcessMemoryInfo,
@@ -77,6 +84,7 @@ import {
 } from "./renderer-storage-migration.mjs";
 
 const { autoUpdater } = electronUpdater;
+const headingShortcutGuard = createHeadingShortcutGuard();
 
 // Fork: the macOS release gate reuses this test mode (scripts/fork-verify-macos-app-update.mjs).
 const linuxUpdateTestMode = (process.platform === "linux" || process.platform === "darwin")
@@ -147,6 +155,7 @@ let windowsDownloadedUpdateVerified = false;
 let sidecarScopeKey = "anonymous";
 let activeAccountId = null;
 let shutdownCleanupStarted = false;
+let releaseDesktopAcpSessions = async () => {};
 let sidecarRestartTimer = null;
 let sidecarRestartAttempts = 0;
 let sidecarRestartInFlight = false;
@@ -369,8 +378,16 @@ const openDesktopDiagnosticIssue = async (details) => {
   }));
 };
 
+const revealMainWindow = () => {
+  if (!mainWindow || mainWindow.isDestroyed()) return false;
+  if (mainWindow.isVisible() && !mainWindow.isMinimized()) return true;
+  if (process.platform === "darwin") app.show();
+  return showWindow(mainWindow);
+};
+
 const handleRendererProcessGone = async (details) => {
   if (isQuitting || details.reason === "clean-exit" || rendererCrashDialogOpen) return;
+  revealMainWindow();
   rendererCrashDialogOpen = true;
   const isChinese = app.getLocale().toLowerCase().startsWith("zh");
   try {
@@ -394,6 +411,7 @@ const handleRendererProcessGone = async (details) => {
 
 const showRendererStartupFailure = async (details) => {
   if (isQuitting || rendererStartupFailureDialogOpen || !mainWindow || mainWindow.isDestroyed()) return;
+  revealMainWindow();
   rendererStartupFailureDialogOpen = true;
   const isChinese = app.getLocale().toLowerCase().startsWith("zh");
   const reason = String(details?.message || details?.errorDescription || details?.kind || "unknown").slice(0, 1000);
@@ -435,6 +453,7 @@ const clearRendererUnresponsiveTimer = () => {
 const showRendererUnresponsive = async () => {
   rendererUnresponsiveTimer = null;
   if (isQuitting || rendererUnresponsiveDialogOpen || !mainWindow || mainWindow.isDestroyed()) return;
+  revealMainWindow();
   rendererUnresponsiveDialogOpen = true;
   const isChinese = app.getLocale().toLowerCase().startsWith("zh");
   try {
@@ -459,6 +478,7 @@ const showRendererUnresponsive = async () => {
 const showMainStartupFailure = async (error) => {
   const message = String(error?.message || error).slice(0, 2000);
   await writeDiagnostic("main.startup-failed", { message, stack: error?.stack });
+  revealMainWindow();
   const isChinese = app.getLocale().toLowerCase().startsWith("zh");
   const options = {
     type: "error",
@@ -1487,7 +1507,7 @@ const desktopRendererEntryUrl = () => app.isPackaged && !process.env.EDGE_EVER_D
   ? (usePrivateAppProtocol ? DESKTOP_APP_ENTRY_URL : pathToFileURL(join(process.resourcesPath, "web/index.html")).href)
   : webUrl;
 
-const createWindow = async () => {
+const createWindow = async ({ show = true } = {}) => {
   const state = await readWindowState();
   mainWindow = new BrowserWindow({
     width: state.width,
@@ -1496,6 +1516,7 @@ const createWindow = async () => {
     y: state.y,
     minWidth: 960,
     minHeight: 640,
+    show,
     webPreferences: {
       preload: join(currentDirectory, "../preload/index.cjs"),
       contextIsolation: true,
@@ -1505,7 +1526,12 @@ const createWindow = async () => {
   });
   rendererReady = false;
   armRendererStartupGuard();
-  if (state.isMaximized) mainWindow.maximize();
+  if (show && state.isMaximized) mainWindow.maximize();
+  else if (state.isMaximized) {
+    mainWindow.once("show", () => {
+      if (!mainWindow?.isDestroyed()) mainWindow.maximize();
+    });
+  }
   mainWindow.on("resize", () => void saveWindowState());
   mainWindow.on("move", () => void saveWindowState());
   mainWindow.on("close", (event) => {
@@ -1516,6 +1542,7 @@ const createWindow = async () => {
     }
   });
   attachEditContextMenu(mainWindow.webContents);
+  headingShortcutGuard.attach(mainWindow.webContents);
   mainWindow.webContents.on("did-create-window", (childWindow) => attachEditContextMenu(childWindow.webContents));
   mainWindow.on("hide", syncRendererHibernate);
   mainWindow.on("hide", () => globalShortcut.setSuspended(false));
@@ -1560,6 +1587,7 @@ const createWindow = async () => {
     void writeDiagnostic("renderer.loaded", { url: mainWindow?.webContents.getURL() || "" });
   });
   mainWindow.webContents.on("render-process-gone", (_event, details) => {
+    headingShortcutGuard.reset();
     globalShortcut.setSuspended(false);
     clearRendererUnresponsiveTimer();
     void writeDiagnostic("renderer.gone", details);
@@ -1706,9 +1734,50 @@ const startApplication = async () => {
   void writeDiagnostic("sidecar.ready", { scope: sidecarScopeKey });
   createTray();
   await loadGlobalShortcut();
+  const loginItems = createLoginItemController({
+    platform: process.platform,
+    packaged: app.isPackaged,
+    executablePath: app.getPath("exe"),
+    preferencePath: join(app.getPath("userData"), "login-item.json"),
+    readFile,
+    writeFile,
+    rename,
+    unlink,
+    getLoginItemSettings: (options) => app.getLoginItemSettings(options),
+    setLoginItemSettings: (settings) => app.setLoginItemSettings(settings),
+  });
+  let loginItemState = loginItems.current();
+  try {
+    loginItemState = await loginItems.reconcileAtStartup();
+  } catch (error) {
+    loginItemState = loginItems.current();
+    void writeDiagnostic("login-item.reconcile-failed", {
+      message: String(error?.message || error).slice(0, 500),
+    });
+  }
+  const startHidden = shouldStartHidden({
+    argv: process.argv,
+    wasOpenedAtLogin: loginItems.wasOpenedAtLogin(),
+    launchMode: loginItemState.launchMode,
+    opensContent: commandLineOpensContent(process.argv, { isAssociatedFile: isSupportedAssociatedFile }),
+  });
+  void writeDiagnostic("login-item.ready", {
+    supported: loginItemState.supported,
+    openAtLogin: loginItemState.openAtLogin,
+    launchMode: loginItemState.launchMode,
+    status: loginItemState.status,
+    startHidden,
+  });
 
   ipcMain.on("desktop:local-data-reset-available-sync", (event) => {
     event.returnValue = process.platform === "darwin" && app.isPackaged && !requestedUserDataDirectory;
+  });
+  ipcMain.handle("desktop:print-pdf", async (event) => {
+    const appUrl = mainWindow?.webContents.getURL();
+    if (!appUrl || !isAllowedPrintPreviewUrl(event.sender.getURL(), appUrl)) {
+      throw new Error("Only the note print preview can save a PDF");
+    }
+    return event.sender.printToPDF(PRINT_PDF_OPTIONS);
   });
   ipcMain.handle("desktop:sidecar-request", async (_event, method, params) => {
     if (!sidecar) throw new Error("EdgeEver sidecar is unavailable");
@@ -1727,6 +1796,14 @@ const startApplication = async () => {
   ipcMain.handle("desktop:global-shortcut", (event) => {
     if (event.sender !== mainWindow?.webContents) return null;
     return globalShortcutState();
+  });
+  ipcMain.handle("desktop:login-item", (event) => {
+    if (event.sender !== mainWindow?.webContents) return null;
+    return loginItems.current();
+  });
+  ipcMain.handle("desktop:set-login-item", (event, patch) => {
+    if (event.sender !== mainWindow?.webContents) return null;
+    return loginItems.update(patch);
   });
   ipcMain.handle("desktop:set-global-shortcut", (event, binding) => {
     if (event.sender !== mainWindow?.webContents) return null;
@@ -1750,6 +1827,11 @@ const startApplication = async () => {
     if (!nextSidecar) throw new Error("EdgeEver sidecar is unavailable");
     await nextSidecar.waitUntilReady();
     return { ready: true, scope: nextScopeKey };
+  });
+  ipcMain.on("desktop:rich-text-heading-shortcut", (event, active) => {
+    if (event.sender !== mainWindow?.webContents || event.senderFrame !== event.sender.mainFrame) return;
+    headingShortcutGuard.setActive(active);
+    event.returnValue = true;
   });
   ipcMain.on("desktop:renderer-ready", (event) => {
     if (event.sender !== mainWindow?.webContents) return;
@@ -1789,9 +1871,10 @@ const startApplication = async () => {
     await saveDesktopSessionToken("");
     return { stored: false };
   });
-  ipcMain.handle("desktop:picgo-test", (event, endpoint) => {
+  ipcMain.handle("desktop:picgo-test", (event, input) => {
     if (event.sender !== mainWindow?.webContents) throw new Error("PicGo requests must come from the main window");
-    return testPicGoConnection(endpoint);
+    const target = input && typeof input === "object" ? input : { endpoint: input, serverKey: "" };
+    return testPicGoConnection(target.endpoint, { serverKey: target.serverKey });
   });
   // Serialize uploads and error dialogs across rapid pastes and multi-image batches.
   const queuePicGoUpload = createPicGoUploadQueue({
@@ -1874,6 +1957,7 @@ const startApplication = async () => {
       return validateTrustedAcpPath(selection.filePaths[0], { excludedRoot: app.getPath("userData") });
     },
   });
+  releaseDesktopAcpSessions = () => acpRuntime.releaseWarmSessions();
   await acpRuntime.pruneAdapters().catch(() => {});
   const refreshAdapters = () => { void acpRuntime.installDetected().catch(() => []).then(() => acpRuntime.updateInstalled()).catch(() => {}); };
   const firstAdapterRefresh = setTimeout(refreshAdapters, 10_000);
@@ -2166,7 +2250,7 @@ const startApplication = async () => {
     ]);
   });
 
-  await createWindow();
+  await createWindow({ show: !startHidden });
   // Inspecting and ejecting mounted disk images invokes macOS command-line
   // tools and may take several seconds. Keep that maintenance off the
   // user-visible critical path so the first installed launch opens promptly.
@@ -2264,6 +2348,7 @@ app.on("before-quit", (event) => {
   }
   tray?.destroy();
   void (async () => {
+    await releaseDesktopAcpSessions().catch(() => {});
     await stopSidecar();
     await unlink(crashMarkerPath()).catch(() => {});
     await writeDiagnostic("session.quit");

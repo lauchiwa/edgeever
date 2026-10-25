@@ -28,6 +28,14 @@ interface DesktopGlobalShortcutState {
   error?: "invalid" | "unavailable" | "saveFailed";
 }
 
+interface DesktopLoginItemState {
+  supported: boolean;
+  openAtLogin: boolean;
+  launchMode: "window" | "tray";
+  status: "disabled" | "enabled" | "requires-approval" | "disabled-by-system" | "unavailable";
+  error?: "invalid" | "saveFailed";
+}
+
 interface EdgeEverDesktopBridge {
   isAvailable: boolean;
   canClearLocalData: boolean;
@@ -41,9 +49,9 @@ interface EdgeEverDesktopBridge {
   readClipboard?(): Promise<{ html: string; text: string; images: Uint8Array[] }>;
   setSessionToken(value: string): Promise<{ stored: boolean }>;
   clearSessionToken(): Promise<{ stored: false }>;
-  testPicGoConnection(endpoint: string): Promise<boolean>;
+  testPicGoConnection(input: { endpoint: string; serverKey?: string }): Promise<boolean>;
   uploadPicGoImage(input: {
-    endpoint: string; bytes: Uint8Array; filename: string; mimeType: string;
+    endpoint: string; serverKey?: string; bytes: Uint8Array; filename: string; mimeType: string;
     copy: import("@/lib/picgo").PicGoFailureCopy;
   }): Promise<{ url: string } | { fallback: true }>;
   publicNetworkFetch(requestId: string, input: import("@edgeever/shared").PluginPublicFetchRequest): Promise<import("@edgeever/shared").PluginPublicFetchResponse>;
@@ -83,6 +91,8 @@ interface EdgeEverDesktopBridge {
   }>;
   globalShortcut(): Promise<DesktopGlobalShortcutState>;
   setGlobalShortcut(binding: DesktopGlobalShortcutBinding | null): Promise<DesktopGlobalShortcutState>;
+  loginItem(): Promise<DesktopLoginItemState | null>;
+  setLoginItem(patch: { openAtLogin?: boolean; launchMode?: "window" | "tray" }): Promise<DesktopLoginItemState | null>;
   captureGlobalShortcut(capturing: boolean): Promise<boolean>;
   setAccountScope(accountId: string | null): Promise<{ ready: true; scope: string }>;
   updateStatus(): Promise<DesktopUpdateStatus>;
@@ -104,6 +114,8 @@ interface EdgeEverDesktopBridge {
   readResource(id: string): Promise<{ type: string; bytes: Uint8Array }>;
   removeStagedResource(id: string): Promise<void>;
   onCommand(callback: (command: string) => void): () => void;
+  setRichTextHeadingShortcutActive?(active: boolean): void;
+  onHeadingShortcut?(callback: (level: number) => void): () => void;
   onHibernatePrepare?(callback: () => void | Promise<void>): () => void;
   syncScheduledTasks(tasks: import("@edgeever/shared").ScheduledTask[]): Promise<{ scheduled: number }>;
   onScheduledTask(callback: (payload: {
@@ -152,11 +164,19 @@ interface EdgeEverDesktopBridge {
     detail?: string;
     authMethods?: Array<{ id: string; name: string }>;
   }>;
+  prepareAcp?(input: {
+    adapterId: "codex" | "claudeCode" | "antigravity" | "openClaw" | "hermesAgent" | "grokBuild" | "deepseekHarness" | "piAgent" | "workbuddyCn" | "workbuddyIntl";
+    path?: string;
+    sessionKey?: string;
+    noteAccess?: boolean;
+  }): Promise<{ ready: boolean }>;
   promptAcp?(input: {
     adapterId: "codex" | "claudeCode" | "antigravity" | "openClaw" | "hermesAgent" | "grokBuild" | "deepseekHarness" | "piAgent" | "workbuddyCn" | "workbuddyIntl";
     path?: string;
     prompt: string;
     contextText?: string;
+    historyText?: string;
+    sessionKey?: string;
     attachments?: Array<{ filename: string; mediaType: string; dataBase64: string }>;
     noteAccess?: boolean;
   }): Promise<{ requestId: string; rejectedAttachments?: Array<{ filename: string; reason: string }> }>;
@@ -247,6 +267,11 @@ interface DesktopRendererErrorDetails {
   exitCode?: number;
 }
 
+interface EdgeEverPrintBridge {
+  savePdf: () => Promise<Uint8Array>;
+}
+
 interface Window {
   edgeeverDesktop?: EdgeEverDesktopBridge;
+  edgeeverPrint?: EdgeEverPrintBridge;
 }
