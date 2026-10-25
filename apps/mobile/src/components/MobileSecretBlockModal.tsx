@@ -21,7 +21,7 @@ export const MobileSecretBlockModal = ({
   theme,
 }: {
   block: SecretBlockAttributes | null;
-  locale: "zh-CN" | "en-US" | "ja" | "pl";
+  locale: "zh-CN" | "en-US" | "ja" | "pl" | "ru";
   onClose: () => void;
   theme: "light" | "dark";
 }) => {
