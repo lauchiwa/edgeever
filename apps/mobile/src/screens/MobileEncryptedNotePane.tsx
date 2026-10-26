@@ -33,7 +33,7 @@ export const MobileEncryptedNotePane = ({
   theme,
   updateMutation,
 }: {
-  locale: "zh-CN" | "en-US" | "ja" | "pl";
+  locale: "zh-CN" | "en-US" | "ja" | "pl" | "ru";
   memo: MemoDetail;
   readOnly: boolean;
   theme: "light" | "dark";

@@ -30,6 +30,7 @@ const WorkspaceApp = lazy(() => import("@/components/WorkspaceApp").then((module
 const PublicNotebookSharePage = lazy(() => import("@/components/PublicNotebookSharePage").then(module => ({ default: module.PublicNotebookSharePage })));
 const PublicSharePage = lazy(() => import("@/components/PublicSharePage").then((module) => ({ default: module.PublicSharePage })));
 const PublicTableFormPage = lazy(() => import("@/components/PublicTableFormPage").then((module) => ({ default: module.PublicTableFormPage })));
+const NotebookSiteManagementPage = lazy(() => import("@/components/NotebookSiteManagementPage").then((module) => ({ default: module.NotebookSiteManagementPage })));
 
 const AuthLoadingScreen = ({ title = "EdgeEver", detail }: { title?: string; detail?: string }) => (
   <div className="flex h-[100dvh] items-center justify-center bg-slate-50 px-6 text-center text-slate-700">
@@ -59,7 +60,7 @@ const EvernoteMigrationRoute = () => {
   );
 };
 
-const AuthenticatedWorkspace = () => {
+const AuthenticatedWorkspace = ({ siteManagement = false }: { siteManagement?: boolean }) => {
   const queryClient = useQueryClient();
   const { t, i18n } = useTranslation();
   const desktopBridge = window.edgeeverDesktop;
@@ -213,14 +214,14 @@ const AuthenticatedWorkspace = () => {
   setSecretBlocksServerSupport(session.features?.secretBlocks === true);
   return (
     <Suspense fallback={<AuthLoadingScreen />}>
-      <WorkspaceApp
+      {siteManagement ? <NotebookSiteManagementPage /> : <WorkspaceApp
         authRequired={session.authRequired}
         demoMode={session.demoMode}
         isLoggingOut={logoutMutation.isPending}
         user={session.user}
         encryptedNotesSupported={session.features?.encryptedNotes === true}
         onLogout={() => logoutMutation.mutate()}
-      />
+      />}
     </Suspense>
   );
 };
@@ -237,11 +238,13 @@ export const App = () => {
       <PwaInstallProvider>
         <Routes>
           <Route path="/share/notebook/:token/:memoId?" element={<Suspense fallback={<AuthLoadingScreen />}><PublicNotebookSharePage /></Suspense>} />
+          <Route path="/s/:slug/:memoId?" element={<Suspense fallback={<AuthLoadingScreen />}><PublicNotebookSharePage /></Suspense>} />
           <Route path="/share/:token" element={<Suspense fallback={<AuthLoadingScreen />}><PublicSharePage /></Suspense>} />
           <Route path="/form/:token" element={<Suspense fallback={<AuthLoadingScreen />}><PublicTableFormPage /></Suspense>} />
           <Route path={EVERNOTE_MIGRATION_PATH} element={<EvernoteMigrationRoute />} />
           <Route path="/" element={<AuthenticatedWorkspace />} />
           <Route path="/settings" element={<AuthenticatedWorkspace />} />
+          <Route path="/notebooks/:notebookId/site" element={<AuthenticatedWorkspace siteManagement />} />
           <Route path="/plugins" element={<AuthenticatedWorkspace />} />
           <Route path="/plugins/:pluginId" element={<AuthenticatedWorkspace />} />
           <Route path="/templates" element={<AuthenticatedWorkspace />} />

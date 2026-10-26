@@ -76,7 +76,9 @@ export const buildCodeSigningCertificate = ({ privateKey, publicKey, role, now =
   const notAfter = new Date(now);
   notAfter.setUTCFullYear(notAfter.getUTCFullYear() + years);
   const serial = randomBytes(16);
-  serial[0] &= 0x7f;
+  // Positive and without a leading zero byte: DER requires the minimal
+  // encoding, and a 0x00 first byte before one below 0x80 is rejected.
+  serial[0] = (serial[0] & 0x7f) | 0x40;
   const name = sequence(set(sequence(oid("2.5.4.3"), utf8(commonName(role)))));
   const spki = publicKey.export({ type: "spki", format: "der" });
   const tbs = sequence(

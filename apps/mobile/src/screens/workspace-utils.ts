@@ -144,6 +144,7 @@ export const formatMemoPreviewDate = (value: string, localePreference: MobileLoc
   if (memoDay === today - 24 * 60 * 60 * 1000) {
     if (locale === "ja") return "昨日";
     if (locale === "pl") return "Wczoraj";
+    if (locale === "ru") return "Вчера";
     if (locale === "en-US") return "Yesterday";
     return "昨天";
   }
@@ -166,8 +167,9 @@ export const formatMemoDetailDate = (value: string, locale: string) => {
 
 export const sortMemoSummaries = (memos: MemoSummary[], sortMode: unknown) =>
   [...memos].sort((left, right) => {
-    if (sortMode === "title-asc") {
-      return (left.title || DEFAULT_MEMO_TITLE).localeCompare(right.title || DEFAULT_MEMO_TITLE);
+    if (sortMode === "title-asc" || sortMode === "title-desc") {
+      const titleCompare = (left.title || DEFAULT_MEMO_TITLE).localeCompare(right.title || DEFAULT_MEMO_TITLE);
+      return sortMode === "title-desc" ? -titleCompare : titleCompare;
     }
     if (sortMode === "created-desc") {
       return right.createdAt.localeCompare(left.createdAt);

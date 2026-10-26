@@ -34,7 +34,7 @@ type Props = {
   content: TiptapDoc;
   dom?: DOMProps;
   editable: boolean;
-  locale: "zh-CN" | "en-US" | "ja" | "pl";
+  locale: "zh-CN" | "en-US" | "ja" | "pl" | "ru";
   theme: "light" | "dark";
   onChange: (doc: TiptapDoc) => Promise<void>;
   onContentError: () => Promise<void>;
