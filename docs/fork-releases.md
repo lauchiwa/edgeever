@@ -186,7 +186,8 @@ explicit `run=false`, so a failing scope step runs the checks.
 Only formal upstream releases are followed, never upstream `main`.
 `main` is protected (pull requests only, no force push or deletion), and
 upstream's `sync-edgeever-upstream.yml` is disabled in this repository's
-settings because it would reset `main` to an upstream snapshot.
+settings because it would reset `main` to an upstream snapshot (see
+[Disabled upstream workflows](#disabled-upstream-workflows)).
 
 1. `fork-upstream-watch.yml` checks daily. When upstream has an unmerged
    release, the run fails (Issues are off, so the failure email is the
@@ -210,8 +211,45 @@ settings because it would reset `main` to an upstream snapshot.
    git push -u origin sync/vX.Y.Z
    ```
 
+5. After merging, check that no new upstream workflow is active (see
+   [Disabled upstream workflows](#disabled-upstream-workflows)).
+
 Do not add database migrations in the fork: their sequential numbers would
 collide with upstream's next ones.
+
+### Disabled upstream workflows
+
+GitHub can disable Actions for the whole fork ("Workflows on this fork have
+been disabled … to reduce the amount of compute that is wasted") until a
+maintainer re-enables them on the Actions page. While disabled, nothing runs,
+including `fork-upstream-watch.yml`, so new upstream releases go unnoticed.
+Inherited workflows are a likely trigger: their jobs are gated to
+`tianma-if/edgeever`, but every push, pull request and release still starts a
+run that is then skipped. GitHub does not publish its criteria, so this
+reduces the risk without guaranteeing it.
+
+These upstream workflows are therefore disabled in the repository (not in the
+files, so upstream syncs do not conflict):
+
+- `sync-edgeever-upstream.yml` (would reset `main` to an upstream snapshot)
+- push or pull request: `acp-cleanup.yml`, `deploy-site.yml`,
+  `deploy-tools.yml`, `docker-image.yml`, `extension-build.yml`,
+  `ios-build.yml`, `mobile-build.yml`, `sync-docker-installer.yml`, `test.yml`
+- release (fork releases trigger them too): `deploy-demo.yml`,
+  `deploy-personal.yml`, `desktop-build.yml`, `docker-tcr-mirror.yml`,
+  `extension-store.yml`
+
+The `fork-*` workflows stay enabled, as do upstream workflows that only run
+manually. A workflow file added by an upstream sync starts enabled, so list
+the active ones after each sync:
+
+```sh
+gh api repos/lauchiwa/edgeever/actions/workflows --jq '.workflows[] | select(.state=="active") | .path'
+```
+
+Disable a new upstream entry with an automatic trigger with
+`gh workflow disable <file> -R lauchiwa/edgeever`; undo it with
+`gh workflow enable`.
 
 ## Releasing
 

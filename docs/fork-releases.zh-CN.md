@@ -113,7 +113,7 @@ vX.Y.Z-rc.N
 
 ## 同步上游版本
 
-只跟随上游**正式 Release**，不跟随上游 `main`。`main` 受保护（只能通过 PR 合入，禁止强制推送和删除）。上游的 `sync-edgeever-upstream.yml` 已在本仓库设置中停用，因为它会把 `main` 重置为上游快照。
+只跟随上游**正式 Release**，不跟随上游 `main`。`main` 受保护（只能通过 PR 合入，禁止强制推送和删除）。上游的 `sync-edgeever-upstream.yml` 已在本仓库设置中停用，因为它会把 `main` 重置为上游快照（见[停用的上游 workflow](#停用的上游-workflow)）。
 
 1. `fork-upstream-watch.yml` 每天检查一次。上游有未合入的新版本时，该运行会失败（Issues 已关闭，所以以失败邮件作为通知），摘要中会给出要执行的命令。
 2. 在干净的工作区本地执行：
@@ -133,7 +133,27 @@ vX.Y.Z-rc.N
    git push -u origin sync/vX.Y.Z
    ```
 
+5. 合并后，检查有没有新启用的上游 workflow（见[停用的上游 workflow](#停用的上游-workflow)）。
+
 **不要在 fork 中新增数据库 Migration：**Migration 使用递增编号，会与上游后续编号冲突。
+
+### 停用的上游 workflow
+
+GitHub 可能停用整个 fork 的 Actions（页面提示“Workflows on this fork have been disabled … to reduce the amount of compute that is wasted”），直到维护者在 Actions 页面重新启用。停用期间任何 workflow 都不会运行，包括 `fork-upstream-watch.yml`，因此上游新版本也不会有提醒。继承自上游的 workflow 很可能是诱因：它们的任务限定在 `tianma-if/edgeever` 上运行，但每次 push、PR 和发布仍会触发一次运行，然后被跳过。GitHub 没有公开判定规则，所以下面的做法只能降低风险，不能保证不再发生。
+
+因此，以下上游 workflow 在仓库中停用（不修改文件，同步上游时不会冲突）：
+
+- `sync-edgeever-upstream.yml`（会把 `main` 重置为上游快照）
+- push 或 PR 触发：`acp-cleanup.yml`、`deploy-site.yml`、`deploy-tools.yml`、`docker-image.yml`、`extension-build.yml`、`ios-build.yml`、`mobile-build.yml`、`sync-docker-installer.yml`、`test.yml`
+- release 触发（二开发布同样会触发）：`deploy-demo.yml`、`deploy-personal.yml`、`desktop-build.yml`、`docker-tcr-mirror.yml`、`extension-store.yml`
+
+`fork-*` workflow 保持启用，只能手动运行的上游 workflow 也保持启用。同步上游新增的 workflow 文件默认启用，所以每次同步后列出启用中的 workflow：
+
+```sh
+gh api repos/lauchiwa/edgeever/actions/workflows --jq '.workflows[] | select(.state=="active") | .path'
+```
+
+新出现的、带自动触发的上游 workflow 用 `gh workflow disable <文件名> -R lauchiwa/edgeever` 停用；需要恢复时用 `gh workflow enable`。
 
 ## 发布
 
