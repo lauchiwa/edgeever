@@ -26,10 +26,23 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v5
-      - uses: oven-sh/setup-bun@v2
+        with:
+          # The merge commit and its parents: the scope step diffs against main.
+          fetch-depth: 2
+      # Markdown that nothing reads skips the rest (docs/fork-releases.md).
+      # Every later step runs unless this prints run=false, so a failure here
+      # runs the checks instead of skipping them.
+      - name: Scope
+        id: scope
+        env:
+          FORK_CI_BEFORE: ${{ github.event.before }}
+        run: node scripts/fork-ci-scope.mjs
+      - if: steps.scope.outputs.run != 'false'
+        uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
-      - name: Install dependencies
+      - if: steps.scope.outputs.run != 'false'
+        name: Install dependencies
         run: |
           for attempt in 1 2 3; do
             bun install --frozen-lockfile && exit 0
@@ -37,19 +50,24 @@ jobs:
             sleep "$((15 * attempt))"
           done
       # First: a clean upstream merge that silently undoes the fork fails here.
-      - name: Fork invariants
+      - if: steps.scope.outputs.run != 'false'
+        name: Fork invariants
         run: bun test scripts/fork-invariants.test.mjs
-      - name: Fork tooling and update trust
+      - if: steps.scope.outputs.run != 'false'
+        name: Fork tooling and update trust
         run: >-
           bun test scripts/fork-release-version.test.mjs scripts/fork-sync-upstream.test.mjs
           scripts/fork-sign-release.test.mjs scripts/fork-generate-update-keys.test.mjs
           scripts/fork-workflows.test.mjs scripts/windows-update-metadata.test.mjs
           scripts/fork-linux-release.test.mjs scripts/fork-macos-release.test.mjs
           scripts/fork-generate-macos-signing-certificates.test.mjs scripts/fork-check.test.mjs
-          apps/desktop/src/main/windows-update-trust.test.mjs
-      - run: bun run typecheck
-      - run: bun run typecheck:mobile
-      - run: bun run build:web
+          scripts/fork-ci-scope.test.mjs apps/desktop/src/main/windows-update-trust.test.mjs
+      - if: steps.scope.outputs.run != 'false'
+        run: bun run typecheck
+      - if: steps.scope.outputs.run != 'false'
+        run: bun run typecheck:mobile
+      - if: steps.scope.outputs.run != 'false'
+        run: bun run build:web
 
   regression:
     if: github.repository == 'lauchiwa/edgeever'
@@ -58,17 +76,27 @@ jobs:
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v5
-      - uses: oven-sh/setup-bun@v2
+        with:
+          fetch-depth: 2
+      - name: Scope
+        id: scope
+        env:
+          FORK_CI_BEFORE: ${{ github.event.before }}
+        run: node scripts/fork-ci-scope.mjs
+      - if: steps.scope.outputs.run != 'false'
+        uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
-      - name: Install dependencies
+      - if: steps.scope.outputs.run != 'false'
+        name: Install dependencies
         run: |
           for attempt in 1 2 3; do
             bun install --frozen-lockfile && exit 0
             [ "$attempt" = "3" ] && exit 1
             sleep "$((15 * attempt))"
           done
-      - run: bun run test
+      - if: steps.scope.outputs.run != 'false'
+        run: bun run test
 
   windows:
     if: github.repository == 'lauchiwa/edgeever'
@@ -77,10 +105,19 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
-      - uses: oven-sh/setup-bun@v2
+        with:
+          fetch-depth: 2
+      - name: Scope
+        id: scope
+        env:
+          FORK_CI_BEFORE: ${{ github.event.before }}
+        run: node scripts/fork-ci-scope.mjs
+      - if: steps.scope.outputs.run != 'false'
+        uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
-      - name: Install dependencies
+      - if: steps.scope.outputs.run != 'false'
+        name: Install dependencies
         shell: pwsh
         run: |
           for ($attempt = 1; $attempt -le 3; $attempt++) {
@@ -91,11 +128,13 @@ jobs:
           }
       # Windows-only behaviour this fork fixed: npm .cmd launchers, process-tree
       # stop, busy-directory cleanup and the Windows update trust gate.
-      - name: ACP and Windows update tests
+      - if: steps.scope.outputs.run != 'false'
+        name: ACP and Windows update tests
         run: >-
           bun test --cwd apps/desktop src/main/acp-host.test.mjs src/main/acp-host-native.test.mjs
           src/main/acp-windows-command.test.mjs src/main/acp-process-lifecycle.test.mjs
           src/main/acp-adapter-manager.test.mjs src/main/claude-acp-compat.test.mjs
           src/main/windows-update-trust.test.mjs
-      - name: Fork invariants on Windows paths
+      - if: steps.scope.outputs.run != 'false'
+        name: Fork invariants on Windows paths
         run: bun test scripts/fork-invariants.test.mjs scripts/windows-update-metadata.test.mjs scripts/fork-sign-release.test.mjs
