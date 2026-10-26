@@ -90,9 +90,9 @@ vX.Y.Z-rc.N
 
 ## 本地检查
 
-`fork-ci.yml` 会在每个 PR 上从零运行全部检查，必须通过的是这次运行。本地只检查改动可能影响的部分：
+`fork-ci.yml` 会在每个可能影响检查结果的 PR 上从零运行全部检查，必须通过的是这次运行（见[CI 中的纯文档改动](#ci-中的纯文档改动)）。本地只检查改动可能影响的部分：
 
-- 仅修改文档：本地无需检查，由 PR 的 CI 覆盖。
+- 仅修改文档：本地无需检查。
 - 修改二开脚本或工作流：只运行受影响的测试文件，例如 `bun test scripts/fork-workflows.test.mjs`。
 - 修改应用代码：
 
@@ -104,6 +104,12 @@ vX.Y.Z-rc.N
   其中的类型检查就是仓库原有的 `bun run typecheck` 和 `bun run typecheck:mobile`，只是加了 `--incremental`。TypeScript 把增量状态保存在 `node_modules/.cache/edgeever-fork`，之后只重新检查有变化的部分。第一次运行与全量检查一样耗时。如果结果看起来不对，删除该目录即可。
 
 `fork-check.mjs` 与 `fork-ci.yml` 的 `checks` 任务列出的二开测试相同；两者不一致时 `scripts/fork-check.test.mjs` 会失败。
+
+### CI 中的纯文档改动
+
+`fork-ci.yml` 的每个任务先运行只依赖 Node 的 `scripts/fork-ci-scope.mjs`。如果相对 `main` 改动的文件全部是 `docs/` 下或仓库根目录的 Markdown，并且没有任何代码、测试或构建读取它们，就跳过该任务的其余步骤。任务仍会上报结果，必需检查约半分钟内通过。合并后 push 到 `main` 的那次运行同样适用。
+
+其他情况一律运行全部检查：改动了其他文件（图片、workflow、脚本），改动了 `READ_DOCS` 中列出的文档（各 README、`AGENTS.md`，以及网站、应用或测试读取的部署、插件和导入指南），手动触发，以及脚本无法判断的情况。workflow 只在明确得到 `run=false` 时跳过，所以判断步骤出错时会运行全部检查。代码读取了未列入 `READ_DOCS` 的文档时，`scripts/fork-ci-scope.test.mjs` 会失败，把它加进列表即可。
 
 ## 同步上游版本
 

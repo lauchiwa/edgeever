@@ -8,7 +8,8 @@
 // `bun run typecheck:mobile` with --incremental, keeping TypeScript's build
 // info under node_modules/.cache, so a small change rechecks only what it
 // touches. This is a local shortcut only: fork-ci.yml still runs every gate
-// from scratch on each pull request, and that run is what must pass.
+// from scratch on each pull request that is not documentation only, and that
+// run is what must pass.
 import { spawnSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -30,6 +31,7 @@ export const FORK_TESTS = [
   "scripts/fork-macos-release.test.mjs",
   "scripts/fork-generate-macos-signing-certificates.test.mjs",
   "scripts/fork-check.test.mjs",
+  "scripts/fork-ci-scope.test.mjs",
   "apps/desktop/src/main/windows-update-trust.test.mjs",
 ];
 

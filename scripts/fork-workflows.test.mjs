@@ -266,6 +266,22 @@ describe("fork workflows", () => {
     expect(action).toContain("-PreactNativeArchitectures=arm64-v8a");
   });
 
+  // Required checks pass when their steps are skipped, so a skip must be an
+  // explicit decision: anything other than run=false runs every check.
+  test("each CI job decides its scope first and skips its checks only on an explicit run=false", () => {
+    const jobs = jobsOf(workflow("fork-ci.yml"));
+    expect(Object.keys(jobs)).toEqual(["checks", "regression", "windows"]);
+    for (const job of Object.values(jobs)) {
+      const steps = job.slice(job.indexOf("    steps:")).split(/^      - /m).slice(1);
+      expect(steps[0]).toMatch(/^uses: actions\/checkout@v5\s+with:\s+(?:#[^\n]*\s+)?fetch-depth: 2\s/);
+      expect(steps[1]).toMatch(/^name: Scope\s+id: scope\s+env:\s+FORK_CI_BEFORE: \$\{\{ github\.event\.before \}\}\s+run: node scripts\/fork-ci-scope\.mjs\s/);
+      expect(steps.length).toBeGreaterThan(3);
+      for (const step of steps.slice(2)) expect(step).toMatch(/^if: steps\.scope\.outputs\.run != 'false'\r?\n/);
+    }
+    // It runs before dependencies are installed, with plain Node.
+    expect(importClosure("fork-ci-scope.mjs").size).toBe(1);
+  });
+
   test("CI and the watcher are read-only", () => {
     for (const name of ["fork-ci.yml", "fork-upstream-watch.yml"]) {
       expect(workflow(name)).toMatch(/permissions:\s*\n\s*contents: read\s*\n/);
