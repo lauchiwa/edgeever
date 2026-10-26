@@ -141,10 +141,12 @@ passphrases). It can be done on a Mac or on Windows:
 
 ## Local checks
 
-`fork-ci.yml` runs every gate from scratch on each pull request, and that run
-is what must pass. Locally, check only what a change can affect:
+`fork-ci.yml` runs every gate from scratch on each pull request that can
+affect them, and that run is what must pass (see
+[Documentation-only changes in CI](#documentation-only-changes-in-ci)).
+Locally, check only what a change can affect:
 
-- Docs only: nothing; the pull request's CI covers it.
+- Docs only: nothing.
 - Fork scripts or workflows: the affected test files, for example
   `bun test scripts/fork-workflows.test.mjs`.
 - Application code:
@@ -162,6 +164,22 @@ is what must pass. Locally, check only what a change can affect:
 
 `fork-check.mjs` and the `checks` job of `fork-ci.yml` list the same fork
 tests; `scripts/fork-check.test.mjs` fails if they drift apart.
+
+### Documentation-only changes in CI
+
+Each `fork-ci.yml` job first runs `scripts/fork-ci-scope.mjs`, which needs
+only Node. It skips the job's remaining steps when every file changed against
+`main` is Markdown under `docs/` or at the repository root that no code, test
+or build reads. The jobs still report, so the required checks pass in about
+half a minute. The same applies to the push of that merge to `main`.
+
+Everything else runs every check: any other file (images, workflows,
+scripts), a document listed in `READ_DOCS` (the READMEs, `AGENTS.md`, and the
+deployment, plugin and import guides the site, app or tests read), a manual
+run, and any case the script cannot classify. The workflow skips only on an
+explicit `run=false`, so a failing scope step runs the checks.
+`scripts/fork-ci-scope.test.mjs` fails when code reads a document missing from
+`READ_DOCS`; add it there.
 
 ## Syncing an upstream release
 
