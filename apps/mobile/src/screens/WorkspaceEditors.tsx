@@ -22,7 +22,7 @@ import {
   writeMobileMemoDraft,
   type MobileMemoDraft,
 } from "../lib/mobile-drafts";
-import { localizeMissingNotebookName, useMobileLocale } from "../lib/mobile-locale";
+import { localizeMissingNotebookName, useMobileLocale, getMobileCatalog, formatMobileCopy } from "../lib/mobile-locale";
 import { useSession } from "../lib/session";
 import { queueMobileMemoCreate, queueMobileMemoUpdate } from "../lib/sync-queue";
 import { createMobileDataScope, upsertLocalMemo } from "../lib/local-mirror";
@@ -33,6 +33,11 @@ import LocalTiptapEditor, { type LocalTiptapEditorRef } from "../components/Loca
 import { SAFE_DOM_WEBVIEW_PROPS } from "../lib/mobile-dom";
 import { safeDomCall } from "../lib/safe-dom-call";
 import { applyMobileEditorUpload, cancelMobileEditorUpload, flushMobileEditor } from "../lib/mobile-editor-controller";
+import {
+  getMobileEditorSaveChrome,
+  MOBILE_EDITOR_AUTOSAVE_DELAY_MS,
+  shouldScheduleMobileEditorAutosave,
+} from "../hooks/mobile-editor-save-chrome";
 import { showEdgeEverKeyboard } from "../../modules/edgeever-keyboard";
 import { MobileResourceActions } from "../components/MobileResourceActions";
 import { MobileSecretBlockModal } from "../components/MobileSecretBlockModal";
@@ -130,14 +135,10 @@ const alertProtectedImageLoadFailure = (
 ) => {
   const statusLabel = failure.status != null
     ? String(failure.status)
-    : locale !== "zh-CN"
-      ? "network error"
-      : "网络错误";
+    : getMobileCatalog(locale).mobile.common.networkError;
   Alert.alert(
-    locale !== "zh-CN" ? "Image failed to load" : "图片加载失败",
-    locale !== "zh-CN"
-      ? `Could not load a note image (${statusLabel}). Check the network and try again.`
-      : `笔记中的图片未能加载（${statusLabel}）。请检查网络后重试。`
+    getMobileCatalog(locale).mobile.common.imageLoadFailed,
+    formatMobileCopy(getMobileCatalog(locale).mobile.common.noteImageLoadFailed, { status: statusLabel })
   );
 };
 
@@ -884,6 +885,7 @@ export const RichEditorModal = ({
   const [draftRestored, setDraftRestored] = useState(Boolean(restoredDraft));
   const [ready, setReady] = useState(false);
   const [dirty, setDirty] = useState(Boolean(restoredDraft));
+  const [autosaveGeneration, setAutosaveGeneration] = useState(0);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -892,7 +894,21 @@ export const RichEditorModal = ({
   const editorStartup = useMobileEditorStartupGuard({ active: Boolean(memo && baseUrl), ready });
   const { pickUploadAssets, uploadSourcePicker } = useMobileEditorUploadAsset();
   const notebookLabel = notebooks.find((notebook) => notebook.id === notebookId)?.name ?? localizeMissingNotebookName(resolvedLocale);
-  const saveLabel = error ? "保存失败" : saving ? "保存中" : uploading ? "上传中" : dirty ? (draftRestored ? "本地草稿" : "未保存") : ready ? "已保存" : "加载中";
+  const saveChrome = getMobileEditorSaveChrome({
+    dirty,
+    draftRestored,
+    error: Boolean(error),
+    ready,
+    saving,
+    uploading,
+  });
+  const closingRef = useRef(false);
+  const requestCloseRef = useRef<() => Promise<void>>(async () => undefined);
+  const markAutosaveDirty = () => {
+    dirtyRef.current = true;
+    setDirty(true);
+    setAutosaveGeneration((current) => current + 1);
+  };
   const titleRef = useRef(title);
   const tagsTextRef = useRef(tagsText);
   const notebookIdRef = useRef(notebookId);
@@ -932,8 +948,7 @@ export const RichEditorModal = ({
     contentSnapshotRef.current = contentSnapshot;
     contentJsonRef.current = contentJson;
     contentMarkdownRef.current = docToMarkdown(contentJson);
-    dirtyRef.current = true;
-    setDirty(true);
+    markAutosaveDirty();
     setError(null);
     flushResolverRef.current?.();
     flushResolverRef.current = null;
@@ -980,9 +995,9 @@ export const RichEditorModal = ({
         dirtyRef.current = false;
         setDirty(false);
       } else {
-        // Newer local edits arrived during the save; keep dirty so the next pass uploads them.
-        dirtyRef.current = true;
-        setDirty(true);
+        // Newer local edits arrived during the save. Restart the quiet period
+        // so the follow-up save does not fire on the timer that already elapsed.
+        markAutosaveDirty();
       }
       setDraftRestored(false);
       return savedMemo;
@@ -992,6 +1007,10 @@ export const RichEditorModal = ({
     } finally {
       savingRef.current = false;
       setSaving(false);
+      if (closingRef.current) {
+        closingRef.current = false;
+        void requestCloseRef.current();
+      }
     }
   };
 
@@ -1004,9 +1023,14 @@ export const RichEditorModal = ({
   });
 
   const requestClose = async () => {
-    if (savingRef.current || uploadingRef.current) {
+    if (uploadingRef.current) {
       return;
     }
+    if (savingRef.current) {
+      closingRef.current = true;
+      return;
+    }
+    closingRef.current = false;
     if (initialFocusTimerRef.current !== null) {
       clearTimeout(initialFocusTimerRef.current);
       initialFocusTimerRef.current = null;
@@ -1017,10 +1041,11 @@ export const RichEditorModal = ({
       onClose();
     }
   };
+  requestCloseRef.current = requestClose;
 
   useEffect(() => {
     const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
-      void requestClose();
+      void requestCloseRef.current();
       return true;
     });
     return () => subscription.remove();
@@ -1162,14 +1187,21 @@ export const RichEditorModal = ({
   }, [dirty, memo, notebookId, tagsText, title]);
 
   useEffect(() => {
-    if (!memoBaseRef.current || !dirty || !ready || savingRef.current || uploadingRef.current) {
+    if (!memoBaseRef.current || !shouldScheduleMobileEditorAutosave({
+      active: true,
+      closing: closingRef.current,
+      dirty,
+      ready,
+      saving: savingRef.current,
+      uploading: uploadingRef.current,
+    })) {
       return;
     }
     const timeout = setTimeout(() => {
       void flushEditor().then(save);
-    }, 1200);
+    }, MOBILE_EDITOR_AUTOSAVE_DELAY_MS);
     return () => clearTimeout(timeout);
-  }, [dirty, memo, notebookId, ready, tagsText, title]);
+  }, [autosaveGeneration, dirty, memo, notebookId, ready, tagsText, title]);
 
   return (
     <SafeAreaView style={styles.richEditorSafeArea}>
@@ -1179,19 +1211,19 @@ export const RichEditorModal = ({
         style={styles.richEditorKeyboardAvoiding}
       >
         <View style={styles.createMemoHeader}>
-          <Pressable accessibilityLabel="返回" accessibilityRole="button" disabled={saving || uploading} onPress={() => void requestClose()} style={styles.createMemoBackButton}>
-            <ChevronLeft color={saving || uploading ? "#cbd5e1" : "#0f172a"} size={30} />
+          <Pressable accessibilityLabel="返回" accessibilityRole="button" disabled={uploading} onPress={() => void requestClose()} style={styles.createMemoBackButton}>
+            <ChevronLeft color={uploading ? "#cbd5e1" : "#0f172a"} size={30} />
           </Pressable>
           <View style={styles.createMemoHeaderActions}>
-            <Text numberOfLines={1} style={[styles.createMemoStatus, styles.richEditorHeaderStatus, (saving || uploading || dirty) && styles.createMemoStatusActive, error && styles.richEditorStatusError]}>{saveLabel}</Text>
+            <Text numberOfLines={1} style={[styles.createMemoStatus, styles.richEditorHeaderStatus, saveChrome.emphasized && styles.createMemoStatusActive, error && styles.richEditorStatusError]}>{saveChrome.label}</Text>
             <Pressable
               accessibilityLabel="完成编辑"
               accessibilityRole="button"
-              disabled={saving || uploading || !ready}
+              disabled={uploading || !ready}
               onPress={() => void requestClose()}
-              style={[styles.createMemoDoneButton, (saving || uploading || !ready) && styles.createMemoDoneButtonDisabled]}
+              style={[styles.createMemoDoneButton, (uploading || !ready) && styles.createMemoDoneButtonDisabled]}
             >
-              {saving ? <ActivityIndicator color="#64748b" size="small" /> : <Text style={[styles.createMemoDoneText, (uploading || !ready) && styles.createMemoDoneTextDisabled]}>完成</Text>}
+              <Text style={[styles.createMemoDoneText, (uploading || !ready) && styles.createMemoDoneTextDisabled]}>完成</Text>
             </Pressable>
           </View>
         </View>
@@ -1202,8 +1234,7 @@ export const RichEditorModal = ({
               autoFocus={initialFocus === "title"}
               onChangeText={(value) => {
                 setTitle(value);
-                dirtyRef.current = true;
-                setDirty(true);
+                markAutosaveDirty();
               }}
               placeholder={DEFAULT_MEMO_TITLE}
               placeholderTextColor="#94a3b8"
@@ -1228,8 +1259,7 @@ export const RichEditorModal = ({
                 disabled={saving || uploading}
                 onChange={(nextTags) => {
                   setTagsText(nextTags.join(", "));
-                  dirtyRef.current = true;
-                  setDirty(true);
+                  markAutosaveDirty();
                 }}
                 selectedTags={parseTags(tagsText)}
                 title={title}
@@ -1260,8 +1290,7 @@ export const RichEditorModal = ({
             }
             setNotebookId(nextNotebookId);
             setNotebookPickerOpen(false);
-            dirtyRef.current = true;
-            setDirty(true);
+            markAutosaveDirty();
           }}
           visible={notebookPickerOpen}
         />
@@ -1269,8 +1298,7 @@ export const RichEditorModal = ({
           dataScope={createMobileDataScope(session?.baseUrl ?? baseUrl, session?.user?.id)}
           onChange={(nextTags) => {
             setTagsText(nextTags.join(", "));
-            dirtyRef.current = true;
-            setDirty(true);
+            markAutosaveDirty();
           }}
           onClose={() => setTagPickerOpen(false)}
           selectedTags={parseTags(tagsText)}

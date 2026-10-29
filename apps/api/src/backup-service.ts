@@ -76,14 +76,19 @@ export const restoreJsonNotebooks = async (
 
   await db.batch(notebooks.map((notebook) => db.prepare(
     `INSERT INTO notebooks (
-      id, workspace_id, parent_id, name, slug, icon, color, sort_order, is_deleted, created_at, updated_at, deleted_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, NULL)
+      id, workspace_id, parent_id, name, slug, icon, color, text_color, color_target, is_bold, icon_inverted, row_inverted, sort_order, is_deleted, created_at, updated_at, deleted_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, NULL)
     ON CONFLICT(id) DO UPDATE SET
       parent_id = excluded.parent_id,
       name = excluded.name,
       slug = excluded.slug,
       icon = excluded.icon,
       color = excluded.color,
+      text_color = excluded.text_color,
+      color_target = excluded.color_target,
+      is_bold = excluded.is_bold,
+      icon_inverted = excluded.icon_inverted,
+      row_inverted = excluded.row_inverted,
       sort_order = excluded.sort_order,
       is_deleted = 0,
       updated_at = excluded.updated_at,
@@ -96,6 +101,11 @@ export const restoreJsonNotebooks = async (
     notebook.slug,
     notebook.icon,
     notebook.color,
+    notebook.textColor ?? null,
+    notebook.colorTarget ?? "icon",
+    Number(notebook.isBold ?? false),
+    Number(notebook.iconInverted ?? false),
+    Number(notebook.rowInverted ?? false),
     notebook.sortOrder,
     notebook.createdAt,
     notebook.updatedAt,
@@ -113,6 +123,24 @@ export const restoreJsonMemos = async (
   // the notes before it restored.
   if (backups.some((backup) => backup.revisions.some((revision) => revision.memoId !== backup.memo.id))) {
     throw new AppError("invalid_backup", "A backup revision belongs to a different memo.", 400);
+  }
+
+  const revisionOwners = new Map<string, string>();
+  const revisionConflict = () => new AppError("backup_revision_id_conflict", "A backup revision ID is already used by another memo.", 409);
+  for (const backup of backups) {
+    for (const revision of backup.revisions) {
+      const owner = revisionOwners.get(revision.id);
+      if (owner && owner !== backup.memo.id) throw revisionConflict();
+      revisionOwners.set(revision.id, backup.memo.id);
+    }
+  }
+  const revisionIds = [...revisionOwners.keys()];
+  for (let index = 0; index < revisionIds.length; index += 50) {
+    const ids = revisionIds.slice(index, index + 50);
+    const existing = await db.prepare(
+      `SELECT id, memo_id FROM memo_revisions WHERE id IN (${ids.map(() => "?").join(", ")})`,
+    ).bind(...ids).all<{ id: string; memo_id: string }>();
+    if (existing.results.some((row) => revisionOwners.get(row.id) !== row.memo_id)) throw revisionConflict();
   }
 
   for (const backup of backups) {
@@ -193,18 +221,7 @@ export const restoreJsonMemos = async (
           `INSERT INTO memo_revisions (
             id, memo_id, revision, title, content_json, content_markdown,
             content_hash, created_by, created_at, tags_json, content_text
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          ON CONFLICT(id) DO UPDATE SET
-            memo_id = excluded.memo_id,
-            revision = excluded.revision,
-            title = excluded.title,
-            content_json = excluded.content_json,
-            content_markdown = excluded.content_markdown,
-            content_hash = excluded.content_hash,
-            created_by = excluded.created_by,
-            created_at = excluded.created_at,
-            tags_json = excluded.tags_json,
-            content_text = excluded.content_text`,
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         ).bind(
           revision.id,
           memo.id,
