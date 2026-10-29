@@ -1,29 +1,35 @@
 {
-  "version": "2.5.0",
+  "version": "2.13.0",
   "changes": {
     "en-US": [
-      "The web app, the in-app desktop interface, and Android can switch to Russian. A Russian system or browser language selects it when no language has been chosen yet. Text that is not translated yet stays in English, and assistant replies do not follow Russian in this release. Desktop system menus, iOS, and the browser clipper stay as they are. Thanks @Sergmay911 for #668.",
-      "The desktop app can upload images to a remote PicList or PicGo server. In image-host settings, enter the service address and a server key when the server requires one. The address can be a NAS or another computer, and the path stays /upload. Use HTTPS for a remote server. Those images stay on the external host and are left out of EdgeEver backups. The website keeps the built-in image host.",
-      "A startup launch of the desktop app opens the main window. The tray-only option is removed. A saved tray-only preference opens the main window on the next launch.",
-      "Infographic notes use the same assistant session menu as other notes. Past chats can be opened, and a new chat can be started. The graphic being edited stays as its own row in that menu, and its generation history remains on the note.",
-      "When a request already names the diagram subject, the assistant no longer reads the open note. A request to diagram or convert the open note still uses that note.",
-      "The marketing site adds a Showcase page with 17 real-world workflows, linked from the top navigation."
+      "Insert chemical formulas and equations, and continue typing naturally after inserting or editing formulas. (#717, #719; @dkoryto, #718, #720)",
+      "Download share QR codes as PNG or SVG, with consistent PNG image dimensions. (#714; @dkoryto, #716)",
+      "Improve attachment restore and shared-resource security to prevent malicious restored content from executing scripts. (#701; @sivdead, #711)",
+      "Fix notes and nested notebooks remaining queued when their parent notebook has not synced yet. (#712)",
+      "Fix Mermaid diagrams with HTML labels in the enlarged viewer and preserve compact subgraph layouts. (#704)",
+      "Preserve the drop position while images upload, remove empty galleries after deleting all images, and refine image controls. (#707, #709)",
+      "Keep single tildes in text such as 1~2~3 instead of rendering accidental strikethrough. (#698)",
+      "Keep the Simplified Chinese default title out of untitled shared pages and link previews. (#713; @dkoryto, #715)"
     ],
     "zh-CN": [
-      "Web、桌面端应用内和 Android 可以切换到俄语。系统或浏览器语言是俄语、且还没有手动选过语言时，会自动使用俄语。还没有翻译的文字继续显示英文，助手回复这次仍不跟随俄语。桌面端的系统菜单、iOS 和浏览器剪藏插件这次不变。感谢 @Sergmay911 的贡献（#668）。",
-      "桌面端可以把图片上传到远程 PicList 或 PicGo。在设置的图床里填写服务地址，服务器要求密钥时再填写服务密钥。地址可以是 NAS 或其他电脑，路径保持为 /upload。远程服务请使用 HTTPS。这些图片留在外部图床，不会进入 EdgeEver 备份。网页版仍然使用内置图床。",
-      "桌面端开机启动时会打开主窗口。只留在托盘的选项已经去掉。以前选过只留在托盘的，下次启动会改成打开主窗口。",
-      "信息图笔记和其他笔记使用同一个助手会话菜单，可以打开以往的对话，也可以新开对话。正在编辑的信息图在菜单里单独占一行，它的生成记录仍保存在这篇笔记上。",
-      "让助手画一张已经写明主题的图时，不再读取当前打开的笔记。要求把当前笔记画成图或转换成图时，仍然使用这篇笔记。",
-      "官网新增「真机演示」页面，收录 17 个真实使用场景，可以从顶部导航进入。"
+      "支持插入化学式与化学方程式，插入或编辑公式后可顺畅继续输入。（#717、#719；@dkoryto，#718、#720）",
+      "支持将分享二维码下载为 PNG 或 SVG，PNG 图片尺寸保持一致。（#714；@dkoryto，#716）",
+      "加强附件恢复与共享资源安全校验，防止恶意恢复内容执行脚本。（#701；@sivdead，#711）",
+      "修复父笔记本尚未同步时，笔记及子笔记本持续卡在同步队列的问题。（#712）",
+      "修复含 HTML 标签的 Mermaid 图表无法放大查看的问题，并改善紧凑子图布局。（#704）",
+      "图片上传期间保留拖放插入位置，删除全部图片后移除空图库，并统一图片控件的视觉样式。（#707、#709）",
+      "保留 1~2~3 等文本中的单波浪线，避免误显示为删除线。（#698）",
+      "修复无标题分享页面及链接预览中出现简体中文默认标题的问题。（#713；@dkoryto，#715）"
     ],
     "ja": [
-      "Web、デスクトップ版のアプリ内界面、Android でロシア語に切り替えられます。システムまたはブラウザの言語がロシア語で、言語を手動選択していない場合は自動でロシア語になります。未翻訳の文言は英語のままです。アシスタントの返信は今回ロシア語に従いません。デスクトップのシステムメニュー、iOS、ブラウザのクリップ拡張は変わりません。@Sergmay911 の貢献に感謝します（#668）。",
-      "デスクトップ版は、リモートの PicList または PicGo に画像をアップロードできます。図床の設定でサービスアドレスを入力し、サーバーが鍵を求める場合はサービスキーも入力します。アドレスは NAS や別のパソコンでもよく、パスは /upload のままです。リモートのサーバーには HTTPS を使ってください。これらの画像は外部の画像ホストに残り、EdgeEver のバックアップには含まれません。Web 版はこれまでどおり内蔵の画像ホストを使います。",
-      "デスクトップ版をログイン時に起動すると、メインウィンドウが開きます。トレイのみの選択肢はなくなりました。以前トレイのみを保存していた場合も、次回の起動からメインウィンドウが開きます。",
-      "インフォグラフィックのノートでも、他のノートと同じアシスタントのセッションメニューを使えます。過去のチャットを開いたり、新しいチャットを始めたりできます。編集中の図はメニュー内の独立した一行のままで、その生成履歴はこのノートに残ります。",
-      "図にしてほしい主題を依頼の中ですでに指定している場合、アシスタントは開いているノートを読まなくなります。開いているノートを図にする、または図へ変換する依頼では、これまでどおりそのノートを使います。",
-      "紹介サイトに「実機デモ」ページを追加しました。17 の実用例を上部のナビゲーションから開けます。"
+      "化学式と化学反応式を挿入でき、数式の挿入・編集後も自然に入力を続けられます。",
+      "共有QRコードをPNGまたはSVGで保存でき、PNGの画像サイズも統一されます。",
+      "添付ファイルの復元と共有リソースの安全性を強化し、不正な復元コンテンツによるスクリプト実行を防ぎます。",
+      "親ノートブックの同期前に作成したノートや子ノートブックが同期待ちのままになる問題を修正します。",
+      "HTMLラベルを含むMermaid図の拡大表示を修正し、サブグラフのコンパクトな配置を改善します。",
+      "画像アップロード中のドロップ位置を保持し、全画像削除後の空ギャラリーを除去して、画像操作の表示を整えます。",
+      "1~2~3のような単一チルダを含む文章が誤って取り消し線になる問題を修正します。",
+      "無題の共有ページやリンクプレビューに簡体字中国語の既定タイトルが表示される問題を修正します。"
     ]
   }
 }

@@ -1,3 +1,5 @@
+import { NotebookAppearanceDialog } from "./dialogs/NotebookAppearanceDialog";
+import type { NotebookUpdateInput } from "@edgeever/shared";
 import { startPosterClientRenderer } from "@/lib/poster-client-render";
 import {
   lazy,
@@ -23,7 +25,8 @@ import { QuickMemoSwitcher } from "./QuickMemoSwitcher";
 import { AppConfirmDialog, MemoDeleteConfirmDialog, NotebookNameDialog } from "./dialogs/ConfirmDialogs";
 import { PluginPanelDialog } from "./plugins/PluginPanelDialog";
 import { shouldDiscardPluginNoteSearchRequest } from "./editor/note-search";
-import { api, ApiRequestError, getOrCreateClientDeviceId } from "@/lib/api";
+import { api, ApiRequestError, getConfiguredDesktopApiBaseUrl, getOrCreateClientDeviceId } from "@/lib/api";
+import type { DesktopBackupStatus } from "@edgeever/shared";
 import { useShowDescendantNotesPreference } from "@/lib/descendant-notes-preference";
 import { MarkdownExportMemoryLimitError, type MarkdownExportProgress } from "@/lib/markdown-export";
 import { exportSelectedMemosAsMarkdownZip } from "@/lib/selected-markdown-export";
@@ -268,6 +271,7 @@ export const WorkspaceApp = ({
   const [memoDocumentActionRequest, setMemoDocumentActionRequest] = useState<MemoDocumentActionRequest | null>(null);
   const [memoDeleteConfirmation, setMemoDeleteConfirmation] = useState<MemoDeleteConfirmation | null>(null);
   const [emptyTrashConfirmationOpen, setEmptyTrashConfirmationOpen] = useState(false);
+  const [appearanceNotebook, setAppearanceNotebook] = useState<Notebook | null>(null);
   const [notebookNameDialog, setNotebookNameDialog] = useState<NotebookNameDialogState | null>(null);
   const [notebookDeleteConfirmation, setNotebookDeleteConfirmation] = useState<Notebook | null>(null);
   const [appNoticeDialog, setAppNoticeDialog] = useState<AppNoticeDialogState | null>(null);
@@ -650,6 +654,27 @@ export const WorkspaceApp = ({
     });
   }, [invalidateWorkspaceQueries, repository, runQueuedSync, syncSummary.total]);
 
+  const refreshedBackupRestores = useRef(new Set<string>());
+  useEffect(() => {
+    const bridge = window.edgeeverDesktop;
+    if (!bridge?.backup || (authRequired && !user) || isLoggingOut) return;
+    let active = true;
+    const consume = (status: DesktopBackupStatus | null) => {
+      if (!active || !status?.lastRestoreAt || status.task || status.importError
+        || status.target.accountId !== (user?.id ?? "local")
+        || status.target.baseUrl !== getConfiguredDesktopApiBaseUrl()) return;
+      const key = `${status.backupSetId}:${status.lastRestoreAt}`;
+      if (refreshedBackupRestores.current.has(key)) return;
+      refreshedBackupRestores.current.add(key);
+      void refreshWorkspaceFromServer("manual").catch(() => {
+        if (active) setAppNoticeDialog({ title: t("desktopBackup.restoreTitle"), description: t("desktopBackup.restoreRefreshFailed") });
+      });
+    };
+    const unsubscribe = bridge.onBackupStatus(consume);
+    void bridge.backup("status").then(consume).catch(() => {});
+    return () => { active = false; unsubscribe(); };
+  }, [authRequired, user?.id, isLoggingOut, refreshWorkspaceFromServer, t]);
+
   const refreshLatestMemos = useCallback(async () => {
     if (isBrowserOffline()) {
       setIsOnline(false);
@@ -699,7 +724,9 @@ export const WorkspaceApp = ({
   const notebooks = notebooksQuery.data?.notebooks ?? [];
   useEffect(() => {
     const english = i18n.resolvedLanguage === "en-US";
-    const preferredNotebookId = english ? "nb_demo_features_en" : "nb_demo_features";
+    const preferredSlug = english ? "feature-demos" : "demo-features";
+    const preferredNotebookId = notebooks.find((notebook) => notebook.slug === preferredSlug)?.id
+      ?? (english ? "nb_demo_features_en" : "nb_demo_features");
 
     if (!notebooks.some((notebook) => notebook.id === preferredNotebookId)) {
       return;
@@ -1224,7 +1251,7 @@ export const WorkspaceApp = ({
       payload,
     }: {
       notebookId: string;
-      payload: { name?: string; parentId?: string | null; sortOrder?: number };
+      payload: NotebookUpdateInput;
     }) => repository.updateNotebook(notebookId, payload),
     onSuccess: async (data) => {
       if (data?.notebook) {
@@ -1335,6 +1362,9 @@ export const WorkspaceApp = ({
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["templates"] });
       setAppNoticeDialog({ title: t("templates.templateCreated"), description: t("templates.templateCreated") });
+    },
+    onError: () => {
+      setAppNoticeDialog({ title: t("templates.createFailedTitle"), description: t("templates.createFailed") });
     },
   });
 
@@ -3332,6 +3362,7 @@ export const WorkspaceApp = ({
                   onCreateMemo={handleCreateMemo}
                   onCreateNotebook={handleCreateNotebook}
                   onRenameNotebook={handleRenameNotebook}
+                  onEditNotebookAppearance={setAppearanceNotebook}
                   onDeleteNotebook={handleDeleteNotebook}
                   onMoveNotebook={handleMoveNotebook}
                   onMoveMemos={handleMoveDraggedMemos}
@@ -3949,6 +3980,14 @@ export const WorkspaceApp = ({
           onCancel={() => setEmptyTrashConfirmationOpen(false)}
           onConfirm={handleConfirmEmptyTrash}
         />
+      )}
+      {appearanceNotebook && (
+        <NotebookAppearanceDialog key={appearanceNotebook.id} notebook={appearanceNotebook}
+          onCancel={() => setAppearanceNotebook(null)}
+          onSubmit={async (appearance) => {
+            await updateNotebookMutation.mutateAsync({ notebookId: appearanceNotebook.id, payload: appearance });
+            setAppearanceNotebook(null);
+          }} />
       )}
       {notebookNameDialog && (
         <NotebookNameDialog

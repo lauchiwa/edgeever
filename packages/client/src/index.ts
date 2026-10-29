@@ -1,3 +1,4 @@
+import type { NotebookUpdateInput } from "@edgeever/shared";
 import {
   parsePreparedAiGeneration,
   streamDirectAiGeneration,
@@ -1183,7 +1184,7 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
         body: JSON.stringify(payload),
       }),
 
-    updateNotebook: (notebookId: string, payload: { name?: string; parentId?: string | null; sortOrder?: number }) =>
+    updateNotebook: (notebookId: string, payload: NotebookUpdateInput) =>
       request<NotebookResponse>(`/api/v1/notebooks/${notebookId}`, {
         method: "PATCH",
         body: JSON.stringify(payload),
@@ -1471,7 +1472,7 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
         body: JSON.stringify({}),
       }),
 
-    updateMemoShare: (memoId: string, payload: { passwordProtected: boolean }) =>
+    updateMemoShare: (memoId: string, payload: { passwordProtected?: boolean; slug?: string | null }) =>
       request<{ share: MemoShare }>(`/api/v1/memos/${memoId}/share`, {
         method: "PATCH",
         body: JSON.stringify(payload),
