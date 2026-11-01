@@ -1,11 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Copy, ExternalLink, Globe, LoaderCircle, Share2, Trash2 } from "lucide-react";
+import { Check, Copy, ExternalLink, FileCode2, Globe, LoaderCircle, Share2, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation } from "react-router";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import { memoSharePathSegment } from "@edgeever/shared";
 import { SharePasswordControls } from "./SharePasswordControls";
 import { ShareSlugControls } from "./ShareSlugControls";
@@ -16,7 +17,7 @@ import { copyTextToClipboard } from "@/lib/clipboard";
 import { MemoNotebookSites } from "../MemoNotebookSites";
 
 export const getPublicShareUrl = (token: string) => {
-  const baseUrl = getConfiguredDesktopApiBaseUrl() || window.location.origin;
+  const baseUrl = getConfiguredDesktopApiBaseUrl() || (typeof window !== "undefined" ? window.location.origin : "");
   return `${baseUrl.replace(/\/$/, "")}/share/${encodeURIComponent(token)}`;
 };
 
@@ -35,7 +36,7 @@ export const ShareMemoDialog = ({
   const location = useLocation();
   const queryClient = useQueryClient();
   const [copyState, setCopyState] = useState<"idle" | "copied" | "error">("idle");
-  const [copyTarget, setCopyTarget] = useState<"link" | "password" | "both">("link");
+  const [copyTarget, setCopyTarget] = useState<"link" | "password" | "both" | "markdown">("link");
   const copyResetTimerRef = useRef<number | null>(null);
   const dialogContentRef = useRef<HTMLDivElement>(null);
   const queryKey = memoShareQueryKey(memoId);
@@ -55,7 +56,15 @@ export const ShareMemoDialog = ({
     },
   });
   const passwordMutation = useMutation({
-    mutationFn: (passwordProtected: boolean) => api.updateMemoShare(memoId, { passwordProtected }),
+    mutationFn: ({ passwordProtected, password }: { passwordProtected: boolean; password?: string }) =>
+      api.updateMemoShare(memoId, { passwordProtected, ...(password ? { password } : {}) }),
+    onSuccess: (data) => {
+      queryClient.setQueryData(queryKey, data);
+      void queryClient.invalidateQueries({ queryKey: ["memo-shares"] });
+    },
+  });
+  const presentationMutation = useMutation({
+    mutationFn: (settings: { showUpdatedAt?: boolean; showBranding?: boolean }) => api.updateMemoShare(memoId, settings),
     onSuccess: (data) => {
       queryClient.setQueryData(queryKey, data);
       void queryClient.invalidateQueries({ queryKey: ["memo-shares"] });
@@ -78,6 +87,7 @@ export const ShareMemoDialog = ({
   useEffect(() => {
     createMutation.reset();
     passwordMutation.reset();
+    presentationMutation.reset();
     slugMutation.reset();
     revokeMutation.reset();
     setCopyState("idle");
@@ -91,11 +101,12 @@ export const ShareMemoDialog = ({
   const revealedPassword = share?.passwordProtected ? share.password ?? "" : "";
 
   const shareUrl = share ? getPublicShareUrl(memoSharePathSegment(share)) : "";
-  const isWorking = shareQuery.isLoading || createMutation.isPending || passwordMutation.isPending || slugMutation.isPending || revokeMutation.isPending;
+  const markdownUrl = shareUrl ? `${shareUrl}.md` : "";
+  const isWorking = shareQuery.isLoading || createMutation.isPending || passwordMutation.isPending || presentationMutation.isPending || slugMutation.isPending || revokeMutation.isPending;
   const slugTaken = slugMutation.error instanceof ApiRequestError && slugMutation.error.code === "share_slug_taken";
-  const error = shareQuery.error || createMutation.error || passwordMutation.error || (slugTaken ? null : slugMutation.error) || revokeMutation.error;
+  const error = shareQuery.error || createMutation.error || passwordMutation.error || presentationMutation.error || (slugTaken ? null : slugMutation.error) || revokeMutation.error;
 
-  const markCopied = (target: "link" | "password" | "both", copied: boolean) => {
+  const markCopied = (target: "link" | "password" | "both" | "markdown", copied: boolean) => {
     setCopyTarget(target);
     setCopyState(copied ? "copied" : "error");
     if (copyResetTimerRef.current !== null) window.clearTimeout(copyResetTimerRef.current);
@@ -105,7 +116,7 @@ export const ShareMemoDialog = ({
     }, 3000);
   };
 
-  const copyValue = async (target: "link" | "password" | "both", value: string) => {
+  const copyValue = async (target: "link" | "password" | "both" | "markdown", value: string) => {
     markCopied(target, await copyTextToClipboard(value));
   };
 
@@ -164,6 +175,35 @@ export const ShareMemoDialog = ({
               </Button>
             </div>
 
+            <div className="flex items-center justify-between gap-2 px-0.5 text-xs">
+              <span className="flex min-w-0 items-center gap-1.5 text-slate-700 dark:text-slate-300">
+                <FileCode2 className="h-4 w-4 shrink-0 text-slate-500" />
+                <span className="font-medium">{t("sharing.markdownRawLabel")}</span>
+                <span className="truncate text-[11px] text-slate-400">
+                  · {share.passwordProtected
+                    ? t("sharing.markdownPasswordProtectedHint")
+                    : t("sharing.markdownHint")}
+                </span>
+              </span>
+              <Button
+                type="button"
+                variant={copyState === "copied" && copyTarget === "markdown" ? "solid" : copyState === "error" && copyTarget === "markdown" ? "danger" : "outline"}
+                size="sm"
+                className={`h-7 px-2.5 text-xs shrink-0 ${copyState === "copied" && copyTarget === "markdown" ? SHARE_DIALOG_PRIMARY_BUTTON_CLASS_NAME : ""}`}
+                disabled={Boolean(share.passwordProtected)}
+                onClick={() => void copyValue("markdown", markdownUrl)}
+              >
+                {copyState === "copied" && copyTarget === "markdown" ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                {t(
+                  copyState === "copied" && copyTarget === "markdown"
+                    ? "sharing.copied"
+                    : copyState === "error" && copyTarget === "markdown"
+                      ? "sharing.copyFailed"
+                      : "sharing.copyMarkdownLink",
+                )}
+              </Button>
+            </div>
+
             <ShareSlugControls
               slug={share.slug ?? null}
               busy={isWorking}
@@ -177,8 +217,38 @@ export const ShareMemoDialog = ({
               busy={isWorking}
               shareUrl={shareUrl}
               hideCopyBoth={true}
-              onChange={(enabled) => passwordMutation.mutate(enabled)}
+              allowCustomPassword={true}
+              onChange={(enabled, password) => {
+                const payload = { passwordProtected: enabled, password };
+                if (password !== undefined) {
+                  return passwordMutation.mutateAsync(payload).then(() => undefined);
+                }
+                passwordMutation.mutate(payload);
+              }}
             />
+
+            <div className="space-y-3 border-t border-slate-100 pt-3">
+              <div className="flex items-center justify-between gap-3">
+                <label htmlFor="share-show-updated-at" className="text-xs font-normal leading-5 text-slate-600">{t("sharing.showUpdatedAt")}</label>
+                <Switch
+                  id="share-show-updated-at"
+                  aria-label={t("sharing.showUpdatedAt")}
+                  checked={share.showUpdatedAt !== false}
+                  disabled={isWorking}
+                  onCheckedChange={(enabled) => presentationMutation.mutate({ showUpdatedAt: enabled })}
+                />
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <label htmlFor="share-show-branding" className="text-xs font-normal leading-5 text-slate-600">{t("sharing.showBranding")}</label>
+                <Switch
+                  id="share-show-branding"
+                  aria-label={t("sharing.showBranding")}
+                  checked={share.showBranding !== false}
+                  disabled={isWorking}
+                  onCheckedChange={(enabled) => presentationMutation.mutate({ showBranding: enabled })}
+                />
+              </div>
+            </div>
 
             {share.passwordProtected ? null : (
               <ShareQrCode key={`qr-${share.token}`} url={shareUrl} hint={t("sharing.qrCodeHint")} />
@@ -189,10 +259,22 @@ export const ShareMemoDialog = ({
                 <Trash2 className="h-4 w-4" />
                 {t("sharing.revoke")}
               </Button>
-              <Button variant="outline" className="ml-auto" onClick={() => window.open(shareUrl, "_blank", "noopener,noreferrer")}>
-                <ExternalLink className="h-4 w-4" />
-                {t("sharing.open")}
-              </Button>
+              <div className="ml-auto flex items-center gap-2">
+                {!share.passwordProtected ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => window.open(markdownUrl, "_blank", "noopener,noreferrer")}
+                  >
+                    <FileCode2 className="h-4 w-4" />
+                    {t("sharing.openMarkdown")}
+                  </Button>
+                ) : null}
+                <Button variant="outline" onClick={() => window.open(shareUrl, "_blank", "noopener,noreferrer")}>
+                  <ExternalLink className="h-4 w-4" />
+                  {t("sharing.open")}
+                </Button>
+              </div>
             </div>
           </div>
         ) : (
