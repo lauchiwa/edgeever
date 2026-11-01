@@ -12,7 +12,7 @@ import "../../apps/web/src/styles/globals.css";
 const i18n = i18next.createInstance();
 await i18n.init({ lng: "zh-CN", resources: { "zh-CN": { translation: zhCN } }, interpolation: { escapeValue: false }, initAsync: false });
 const status: DesktopBackupStatus = {
-  config: { enabled: false, interval: "weekly", retention: 5, directory: "/test/Backups", encrypted: false },
+  config: { enabled: false, interval: "weekly", retention: 1, directory: "/test/Backups", encrypted: false },
   backupSetId: "fixture-backup-set", actualDirectory: "/test/Backups/fixture-backup-set", blocked: false,
   passwordSet: false, secureStorageAvailable: true, lastAttemptAt: null, lastSuccessAt: "2026-10-25T03:00:00.000Z",
   lastCheck: { at: "2026-10-26T03:00:00.000Z", result: "unchanged" }, lastRestoreAt: null, nextDueAt: null, pendingPublication: null, target: { baseUrl: "http://test-instance", accountId: "test-account" },
@@ -28,6 +28,7 @@ let encrypted = true;
 let holdHandshake = false;
 let runError = false;
 let deleteError = false;
+const saveError = new URLSearchParams(location.search).has("save-error");
 let finish: (() => void) | undefined;
 Object.defineProperty(window, "edgeeverDesktop", {
   configurable: true,
@@ -41,6 +42,8 @@ Object.defineProperty(window, "edgeeverDesktop", {
         status.history.push({ name: option.name.replace(/(?:\.edgeever\.enc|\.zip)$/i, "") + (option.encrypted ? ".edgeever.enc" : ".zip"), directory: status.config.directory, completedAt: at, size: 149755, encrypted: option.encrypted });
         status.lastSuccessAt = at; status.lastCheck = { at, result: "success" }; emit();
       }
+      if (action === "save" && saveError) throw Object.assign(new Error("Denied"), { code: "backup_directory_unavailable" });
+      if (action === "choose-directory") return "/test/SelectedBackups";
       if (action === "save") { status.config = value!.config!; if (value?.password) status.passwordSet = true; emit(); }
       if (action === "delete-history") {
         if (deleteError) throw Object.assign(new Error("Denied"), { code: "EACCES" });
