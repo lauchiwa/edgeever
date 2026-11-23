@@ -13,6 +13,11 @@ import { WINDOWS_UPDATE_KEY_ID, verifyWindowsUpdateMetadata, verifyDownloadedWin
 const require = createRequire(new URL("../../package.json", import.meta.url));
 const { BaseUpdater } = require("electron-updater/out/BaseUpdater.js");
 
+const installed = "2.16.1-rc.0";
+const firstUpdate = "2.17.0-rc.0";
+const nextUpdate = "2.17.0-rc.1";
+const latestUpdate = "2.18.0-rc.0";
+
 const deferred = () => {
   let resolve, reject;
   const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
@@ -29,7 +34,7 @@ const harness = async () => {
   directories.push(directory);
   const keys = generateKeyPairSync("ed25519");
   const releases = new Map();
-  for (const version of ["2.17.0", "2.18.0", "2.19.0"]) {
+  for (const version of [firstUpdate, nextUpdate, latestUpdate]) {
     const bytes = Buffer.from(`installer ${version}`);
     const name = `EdgeEver-${version}-windows-x64.exe`;
     const path = join(directory, name);
@@ -49,12 +54,12 @@ const harness = async () => {
       signature: sign(null, manifestBytes, keys.privateKey).toString("base64") }));
     releases.set(version, { path, info, manifest, manifestBytes, signatureBytes });
   }
-  const h = { latest: "2.17.0", checks: 0, downloads: [], installs: [], errors: [], notices: [], statuses: [],
+  const h = { latest: firstUpdate, checks: 0, downloads: [], installs: [], errors: [], notices: [], statuses: [],
     checkGate: null, metadataGate: null, downloadGate: null, hashGate: null,
     checkError: null, metadataError: null, downloadError: null, eventVersion: null, packagePath: null,
     corruptSignature: false, corruptMetadata: false };
   const updater = new BaseUpdater(null, {
-    version: "2.16.1", isPackaged: true,
+    version: installed, isPackaged: true,
     onQuit: (handler) => { h.quitHandler = handler; },
   });
   updater.logger = null;
@@ -62,7 +67,7 @@ const harness = async () => {
     h.checks++;
     if (h.checkGate) await h.checkGate.promise;
     if (h.checkError) throw h.checkError;
-    if (!h.latest) return { info: { version: "2.16.1" }, provider: {} };
+    if (!h.latest) return { info: { version: installed }, provider: {} };
     const info = structuredClone(releases.get(h.latest).info);
     if (h.corruptMetadata) info.files[0].sha512 = "invalid";
     updater.selected = info;
@@ -117,32 +122,32 @@ describe("desktop update target lifecycle (#776)", () => {
   test("replaces a downloaded intermediate version with the newest release", async () => {
     const h = await harness();
     await h.ready();
-    h.latest = "2.19.0";
+    h.latest = latestUpdate;
     await h.controller.check("interval");
     await h.settle();
-    expect(h.downloads).toEqual(["2.17.0", "2.19.0"]);
-    expect(h.controller.snapshot().version).toBe("2.19.0");
+    expect(h.downloads).toEqual([firstUpdate, latestUpdate]);
+    expect(h.controller.snapshot().version).toBe(latestUpdate);
     expect(await h.controller.install()).toEqual({ started: true });
-    expect(h.installs).toEqual([{ version: "2.19.0", path: h.releases.get("2.19.0").path, silent: true, forceRun: true }]);
+    expect(h.installs).toEqual([{ version: latestUpdate, path: h.releases.get(latestUpdate).path, silent: true, forceRun: true }]);
   });
 
   test("checks again at installation time and installs the latest directly", async () => {
     const h = await harness();
     await h.ready();
-    h.latest = "2.18.0";
+    h.latest = nextUpdate;
     expect(await h.controller.install()).toEqual({ started: true });
-    expect(h.downloads).toEqual(["2.17.0", "2.18.0"]);
-    expect(h.installs.map((entry) => entry.version)).toEqual(["2.18.0"]);
+    expect(h.downloads).toEqual([firstUpdate, nextUpdate]);
+    expect(h.installs.map((entry) => entry.version)).toEqual([nextUpdate]);
   });
 
   test("normal Windows quit refreshes the installer and does not relaunch", async () => {
     const h = await harness();
     await h.ready();
-    h.latest = "2.19.0";
+    h.latest = latestUpdate;
     expect(h.controller.handleBeforeQuit({ preventDefault() {} })).toBe(true);
     await h.controller.install();
-    expect(h.installs).toEqual([{ version: "2.19.0", path: h.releases.get("2.19.0").path, silent: true, forceRun: false }]);
-    expect(h.notices).toEqual(["2.17.0"]);
+    expect(h.installs).toEqual([{ version: latestUpdate, path: h.releases.get(latestUpdate).path, silent: true, forceRun: false }]);
+    expect(h.notices).toEqual([firstUpdate]);
   });
 
   test("an unchanged release does not download or prompt again", async () => {
@@ -150,19 +155,19 @@ describe("desktop update target lifecycle (#776)", () => {
     await h.ready();
     await h.controller.check("manual");
     expect(h.checks).toBe(2);
-    expect(h.downloads).toEqual(["2.17.0"]);
-    expect(h.notices).toEqual(["2.17.0"]);
+    expect(h.downloads).toEqual([firstUpdate]);
+    expect(h.notices).toEqual([firstUpdate]);
     expect(h.updater.autoInstallOnAppQuit).toBe(true);
   });
 
   test("an old native dialog cannot approve installing a replacement version", async () => {
     const h = await harness();
     await h.ready();
-    h.latest = "2.18.0";
-    expect(await h.controller.install("2.17.0")).toEqual({ started: false });
+    h.latest = nextUpdate;
+    expect(await h.controller.install(firstUpdate)).toEqual({ started: false });
     expect(h.installs).toEqual([]);
-    expect(h.notices).toEqual(["2.17.0", "2.18.0"]);
-    expect(await h.controller.install("2.18.0")).toEqual({ started: true });
+    expect(h.notices).toEqual([firstUpdate, nextUpdate]);
+    expect(await h.controller.install(nextUpdate)).toEqual({ started: true });
   });
 
   test("blocks quit installation during a check and coalesces manual installation requests", async () => {
@@ -186,11 +191,11 @@ describe("desktop update target lifecycle (#776)", () => {
   test("serializes checks and installation around asynchronous Windows hashing", async () => {
     const h = await harness();
     await h.ready();
-    h.latest = "2.18.0";
+    h.latest = nextUpdate;
     h.hashGate = deferred();
     await h.controller.check("manual");
     await flush();
-    h.latest = "2.19.0";
+    h.latest = latestUpdate;
     await h.controller.check("resume");
     expect(h.checks).toBe(2);
     expect(h.updater.autoInstallOnAppQuit).toBe(false);
@@ -199,7 +204,7 @@ describe("desktop update target lifecycle (#776)", () => {
     expect(await h.controller.install()).toEqual({ started: false });
     h.hashGate.resolve();
     await h.settle();
-    expect(h.controller.snapshot()).toMatchObject({ state: "downloaded", version: "2.18.0" });
+    expect(h.controller.snapshot()).toMatchObject({ state: "downloaded", version: nextUpdate });
     expect(h.updater.autoInstallOnAppQuit).toBe(true);
   });
 
@@ -207,14 +212,14 @@ describe("desktop update target lifecycle (#776)", () => {
     test(`a replacement ${failure} failure never installs the old or unverified package`, async () => {
       const h = await harness();
       await h.ready();
-      h.latest = "2.18.0";
+      h.latest = nextUpdate;
       if (failure === "check") h.checkError = new Error("offline");
       if (failure === "metadata") h.metadataError = new Error("metadata unavailable");
       if (failure === "download") h.downloadError = new Error("download failed");
       if (failure === "signature") h.corruptSignature = true;
       if (failure === "metadata-digest") h.corruptMetadata = true;
-      if (failure === "package-digest") await writeFile(h.releases.get(h.latest).path, "tampered! 2.18.0");
-      if (failure === "event-version") h.eventVersion = "2.17.0";
+      if (failure === "package-digest") await writeFile(h.releases.get(h.latest).path, `tampered! ${h.latest}`);
+      if (failure === "event-version") h.eventVersion = firstUpdate;
       await h.controller.check("interval").catch(() => {});
       await h.settle();
       expect(await h.controller.install()).toEqual({ started: false });
@@ -228,34 +233,34 @@ describe("desktop update target lifecycle (#776)", () => {
   test("does not download a replacement until its signature gate completes", async () => {
     const h = await harness();
     await h.ready();
-    h.latest = "2.18.0";
+    h.latest = nextUpdate;
     h.metadataGate = deferred();
     const check = h.controller.check("manual");
     expect(h.controller.check("resume")).toBe(check);
     await flush();
-    expect(h.downloads).toEqual(["2.17.0"]);
+    expect(h.downloads).toEqual([firstUpdate]);
     expect(h.updater.autoInstallOnAppQuit).toBe(false);
     expect(await h.controller.install()).toEqual({ started: false });
     h.metadataGate.resolve();
     await check;
     await h.settle();
-    expect(h.downloads).toEqual(["2.17.0", "2.18.0"]);
+    expect(h.downloads).toEqual([firstUpdate, nextUpdate]);
   });
 
   test("does not replace the updater target during a pending download", async () => {
     const h = await harness();
     await h.ready();
-    h.latest = "2.18.0";
+    h.latest = nextUpdate;
     h.downloadGate = deferred();
     await h.controller.check("manual");
-    h.latest = "2.19.0";
+    h.latest = latestUpdate;
     await h.controller.check("resume");
     expect(h.checks).toBe(2);
-    expect(h.updater.selected.version).toBe("2.18.0");
+    expect(h.updater.selected.version).toBe(nextUpdate);
     expect(h.updater.autoInstallOnAppQuit).toBe(false);
     h.downloadGate.resolve();
     await h.settle();
-    expect(h.controller.snapshot().version).toBe("2.18.0");
+    expect(h.controller.snapshot().version).toBe(nextUpdate);
   });
 
   test("a changed digest at the same version cannot reuse the old verified target", async () => {
@@ -288,7 +293,7 @@ describe("desktop update target lifecycle (#776)", () => {
     h.hashGate.resolve();
     await h.settle();
     expect(typeof h.quitHandler).toBe("function");
-    h.latest = "2.18.0";
+    h.latest = nextUpdate;
     h.metadataGate = deferred();
     const check = h.controller.check("interval");
     h.quitHandler(0);
@@ -297,7 +302,7 @@ describe("desktop update target lifecycle (#776)", () => {
     await check;
     await h.settle();
     h.quitHandler(0);
-    expect(h.installs).toEqual([{ version: "2.18.0", path: h.releases.get("2.18.0").path, silent: true, forceRun: false }]);
+    expect(h.installs).toEqual([{ version: nextUpdate, path: h.releases.get(nextUpdate).path, silent: true, forceRun: false }]);
   });
 
   test("a failed check can recover and reauthorize a verified cached package", async () => {
@@ -315,7 +320,7 @@ describe("desktop update target lifecycle (#776)", () => {
   test("requires the installed Windows file to be the verified file", async () => {
     const h = await harness();
     await h.ready();
-    h.updater.downloadedUpdateHelper.file = h.releases.get("2.18.0").path;
+    h.updater.downloadedUpdateHelper.file = h.releases.get(nextUpdate).path;
     h.metadataGate = deferred();
     const install = h.controller.install();
     await flush();

@@ -1538,7 +1538,9 @@ describe("ACP stdio session", () => {
       expect(report.newSession.mcpServers).toEqual([]);
       expect(report.prompt[0].text).toContain("EdgeEver note tools are not available");
       expect(report.prompt[0].text).not.toContain("use only the session-provided MCP server");
-      expect(report.prompt.at(-1)).toEqual({ type: "text", text: "List my notes" });
+      expect(report.prompt).toHaveLength(1);
+      expect(report.prompt[0].type).toBe("text");
+      expect(report.prompt[0].text.endsWith("## Current user request\nList my notes")).toBe(true);
 
       const readOnly = collector();
       await runtime.prompt({ adapterId: "piAgent", prompt: "Summarize", noteAccess: false }, readOnly.emit);
