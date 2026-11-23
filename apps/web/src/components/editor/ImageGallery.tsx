@@ -1,4 +1,5 @@
-import { useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { autoUpdate, useFloating } from "@floating-ui/react-dom";
 import {
   NodeViewContent,
   NodeViewWrapper,
@@ -17,6 +18,7 @@ import {
   type ImageGalleryLayout,
 } from "@edgeever/shared";
 import { cn } from "@/lib/utils";
+import { imageGalleryToolbarPosition } from "./image-gallery-toolbar-position";
 
 const ImageGalleryNodeView = ({ editor, node, selected, updateAttributes }: NodeViewProps) => {
   const { t } = useTranslation();
@@ -26,6 +28,32 @@ const ImageGalleryNodeView = ({ editor, node, selected, updateAttributes }: Node
     editor,
     selector: ({ editor: activeEditor }) => activeEditor.isEditable,
   });
+  const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const [clicked, setClicked] = useState(false);
+  const active = isEditable && (hovered || focused || clicked);
+  const { refs, floatingStyles, placement, middlewareData, isPositioned } = useFloating<HTMLDivElement>({
+    ...imageGalleryToolbarPosition,
+    open: active,
+    whileElementsMounted: active ? autoUpdate : undefined,
+  });
+  const visible = active && isPositioned && !middlewareData.hide?.referenceHidden;
+
+  useEffect(() => {
+    if (!isEditable) {
+      setClicked(false);
+      return;
+    }
+    const gallery = refs.reference.current;
+    if (!clicked || !gallery) return;
+
+    const dismissOnOutsidePointerDown = (event: PointerEvent) => {
+      if (event.target instanceof Node && !gallery.contains(event.target)) setClicked(false);
+    };
+    const ownerDocument = gallery.ownerDocument;
+    ownerDocument.addEventListener("pointerdown", dismissOnOutsidePointerDown, true);
+    return () => ownerDocument.removeEventListener("pointerdown", dismissOnOutsidePointerDown, true);
+  }, [clicked, isEditable, refs.reference]);
 
   const setGalleryAttributes = useCallback((attributes: { layout?: ImageGalleryLayout; fit?: ImageGalleryFit }) => {
     updateAttributes(attributes);
@@ -33,16 +61,30 @@ const ImageGalleryNodeView = ({ editor, node, selected, updateAttributes }: Node
 
   return (
     <NodeViewWrapper
+      ref={refs.setReference}
       className={cn("edgeever-image-gallery", selected && "is-selected")}
       data-edgeever-image-gallery="true"
       data-image-count={node.childCount}
       data-image-gallery-layout={layout}
       data-image-gallery-fit={fit}
       tabIndex={isEditable ? 0 : undefined}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onClick={(event: React.MouseEvent<HTMLDivElement>) => {
+        if (isEditable && event.target instanceof HTMLImageElement) setClicked(true);
+      }}
+      onFocusCapture={() => setFocused(true)}
+      onBlurCapture={(event: React.FocusEvent<HTMLDivElement>) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) setFocused(false);
+      }}
     >
       {isEditable ? (
         <div
+          ref={refs.setFloating}
           className="edgeever-image-gallery__toolbar"
+          data-placement={placement}
+          data-visible={visible}
+          style={floatingStyles}
           contentEditable={false}
           aria-label={t("editor.imageGallery.toolbar")}
           role="toolbar"

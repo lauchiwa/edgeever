@@ -9,16 +9,68 @@ export const DEFAULT_NOTE_PROSE_LINE_HEIGHT: NoteProseLineHeight = 1.65;
 export const NOTE_PROSE_PALETTE_IDS = [
   "clay",
   "dawn",
+  "emerald",
   "teal",
   "azure",
   "violet",
   "pink",
+  "rose",
   "slate",
 ] as const;
 export type NoteProsePaletteId = (typeof NOTE_PROSE_PALETTE_IDS)[number];
 
 export const NOTE_PROSE_PALETTE_CHOICES = ["native", ...NOTE_PROSE_PALETTE_IDS] as const;
 export type NoteProsePaletteChoice = (typeof NOTE_PROSE_PALETTE_CHOICES)[number];
+
+export const NOTE_PROSE_HEADING_STYLES = [
+  "default",
+  "bar",
+  "numbered",
+] as const;
+export type NoteProseHeadingStyle = (typeof NOTE_PROSE_HEADING_STYLES)[number];
+export const DEFAULT_NOTE_PROSE_HEADING_STYLE: NoteProseHeadingStyle = "default";
+
+export const NOTE_PROSE_QUOTE_STYLES = [
+  "default",
+  "dashed",
+  "accent-bar",
+  "minimal-rule",
+] as const;
+export type NoteProseQuoteStyle = (typeof NOTE_PROSE_QUOTE_STYLES)[number];
+export const DEFAULT_NOTE_PROSE_QUOTE_STYLE: NoteProseQuoteStyle = "default";
+
+export const NOTE_PROSE_EMPHASIS_STYLES = [
+  "default",
+  "marker",
+] as const;
+export type NoteProseEmphasisStyle = (typeof NOTE_PROSE_EMPHASIS_STYLES)[number];
+export const DEFAULT_NOTE_PROSE_EMPHASIS_STYLE: NoteProseEmphasisStyle = "default";
+
+export const NOTE_PROSE_PARAGRAPH_SPACINGS = [8, 12, 16] as const;
+export type NoteProseParagraphSpacing = (typeof NOTE_PROSE_PARAGRAPH_SPACINGS)[number];
+export const NOTE_PROSE_TEXT_ALIGNS = ["left", "justify"] as const;
+export type NoteProseTextAlign = (typeof NOTE_PROSE_TEXT_ALIGNS)[number];
+export const NOTE_PROSE_LETTER_SPACINGS = ["default", "0.5px", "1px"] as const;
+export type NoteProseLetterSpacing = (typeof NOTE_PROSE_LETTER_SPACINGS)[number];
+
+export const parseNoteProseParagraphSpacing = (value: unknown): NoteProseParagraphSpacing | null =>
+  typeof value === "number" && (NOTE_PROSE_PARAGRAPH_SPACINGS as readonly number[]).includes(value)
+    ? value as NoteProseParagraphSpacing : null;
+export const parseNoteProseTextAlign = (value: unknown): NoteProseTextAlign | null =>
+  typeof value === "string" && (NOTE_PROSE_TEXT_ALIGNS as readonly string[]).includes(value)
+    ? value as NoteProseTextAlign : null;
+export const parseNoteProseLetterSpacing = (value: unknown): NoteProseLetterSpacing | null =>
+  typeof value === "string" && (NOTE_PROSE_LETTER_SPACINGS as readonly string[]).includes(value)
+    ? value as NoteProseLetterSpacing : null;
+
+export type NoteProseStylePreferences = {
+  paragraphSpacing: NoteProseParagraphSpacing;
+  textAlign: NoteProseTextAlign;
+  letterSpacing: NoteProseLetterSpacing;
+  headingStyle: NoteProseHeadingStyle;
+  quoteStyle: NoteProseQuoteStyle;
+  emphasisStyle: NoteProseEmphasisStyle;
+};
 
 export const MAX_NOTE_PROSE_CSS_BYTES = 8 * 1024;
 export const NOTE_PROSE_PARAGRAPH_SPACING_PX = 8;
@@ -130,6 +182,17 @@ export const NOTE_PROSE_PALETTES: Record<NoteProsePaletteId, NoteProsePaletteCol
     codeText: "#7C5500",
     background: "#FFFFFF",
   }),
+  emerald: palette({
+    accent: "#059669",
+    text: "#374151",
+    muted: "#4B5563",
+    surface: "#F0FDF4",
+    divider: "#A7F3D0",
+    link: "#047857",
+    codeBackground: "#ECFDF5",
+    codeText: "#047857",
+    background: "#FFFFFF",
+  }),
   teal: palette({
     accent: "#20AD9D",
     text: "#3E4C4A",
@@ -174,6 +237,17 @@ export const NOTE_PROSE_PALETTES: Record<NoteProsePaletteId, NoteProsePaletteCol
     codeText: "#BE185D",
     background: "#FFFFFF",
   }),
+  rose: palette({
+    accent: "#DF1658",
+    text: "#3E3E3E",
+    muted: "#746068",
+    surface: "#FFF8FA",
+    divider: "#F5C7D6",
+    link: "#B7144A",
+    codeBackground: "#FFF0F5",
+    codeText: "#B7144A",
+    background: "#FFFFFF",
+  }),
   slate: palette({
     accent: "#796B7C",
     text: "#5C505E",
@@ -191,10 +265,12 @@ export const NOTE_PROSE_PALETTES: Record<NoteProsePaletteId, NoteProsePaletteCol
 export const NOTE_PROSE_DARK_ACCENTS: Record<NoteProsePaletteId, string> = {
   clay: "#FF996E",
   dawn: "#D9B65C",
+  emerald: "#6EE7B7",
   teal: "#70C7B8",
   azure: "#8CB4F0",
   violet: "#B39AE8",
   pink: "#E794B0",
+  rose: "#FF7AA6",
   slate: "#BCACBF",
 };
 
@@ -252,11 +328,26 @@ export const parseNoteProsePalette = (value: unknown): NoteProsePaletteChoice | 
   // Red and orange now share the existing red identifier for older clients.
   if (value === "orange") return "clay";
   // Removed palettes and the custom color editor read as native.
-  if (value === "emerald" || value === "green" || value === "plum" || value === "custom") return "native";
+  if (value === "green" || value === "plum" || value === "custom") return "native";
   return typeof value === "string" && (NOTE_PROSE_PALETTE_CHOICES as readonly string[]).includes(value)
     ? value as NoteProsePaletteChoice
     : null;
 };
+
+export const parseNoteProseHeadingStyle = (value: unknown): NoteProseHeadingStyle | null =>
+  typeof value === "string" && (NOTE_PROSE_HEADING_STYLES as readonly string[]).includes(value)
+    ? value as NoteProseHeadingStyle
+    : null;
+
+export const parseNoteProseQuoteStyle = (value: unknown): NoteProseQuoteStyle | null =>
+  typeof value === "string" && (NOTE_PROSE_QUOTE_STYLES as readonly string[]).includes(value)
+    ? value as NoteProseQuoteStyle
+    : null;
+
+export const parseNoteProseEmphasisStyle = (value: unknown): NoteProseEmphasisStyle | null =>
+  typeof value === "string" && (NOTE_PROSE_EMPHASIS_STYLES as readonly string[]).includes(value)
+    ? value as NoteProseEmphasisStyle
+    : null;
 
 const isColorSet = (value: unknown): value is NoteProseCustomColorSet => {
   if (typeof value !== "object" || value === null) return false;
@@ -377,3 +468,11 @@ export const noteProseCssVariables = (prose: ResolvedNoteProse): Record<string, 
   variables["--note-palette-bg"] = colors.background;
   return variables;
 };
+
+/** Independent reading rhythm shared by editor, publishing preview, and print. */
+export const noteProseStyleCssVariables = (style: Partial<NoteProseStylePreferences>): Record<string, string> => ({
+  "--editor-paragraph-spacing": `${parseNoteProseParagraphSpacing(style.paragraphSpacing) ?? 8}px`,
+  "--editor-body-text-align": parseNoteProseTextAlign(style.textAlign) ?? "left",
+  "--editor-body-letter-spacing": parseNoteProseLetterSpacing(style.letterSpacing) === null || style.letterSpacing === "default"
+    ? "-0.005em" : style.letterSpacing!,
+});

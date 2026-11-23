@@ -15,7 +15,7 @@ import {
 import { projectNativeUnknownContentForMarkdown } from "./mobile-content-compatibility";
 import { PLUGIN_EMBED_NODE_TYPE } from "./plugin-embed";
 import { NEW_IMAGE_WIDTH_PERCENT, parseImageWidth } from "./image-display";
-import { IMAGE_GALLERY_NODE_TYPE, groupConsecutiveImagesIntoGalleries, normalizeImageGalleries } from "./image-gallery";
+import { IMAGE_GALLERY_NODE_TYPE, groupConsecutiveImagesIntoGalleries, normalizeImageGalleries, prepareImageListsForMarkdown } from "./image-gallery";
 import { EMPTY_EXTERNAL_LINK_NODE_TYPE } from "./empty-external-link";
 import { FRONT_MATTER_LANGUAGE, createFrontMatterNode, getFrontMatterSource, splitMarkdownFrontMatter } from "./front-matter";
 import {
@@ -197,6 +197,19 @@ const upgradeMathCodeFences = (doc: TiptapDoc): TiptapDoc => {
   return content.some((node, index) => node !== doc.content[index]) ? { ...doc, content } : doc;
 };
 
+// Older desktop merges stored each nonblank Markdown line as a literal paragraph.
+// Match that exact shape so an intentionally escaped rule or a rich document
+// is never replaced just because its Markdown copy contains a horizontal rule.
+const isLegacyDesktopLineDocument = (doc: TiptapDoc, markdown: string) => {
+  const lines = markdown.split(/\r?\n/).filter((line) => line.trim());
+  return lines.length === doc.content.length && doc.content.every((node, index) => {
+    const text = node.content?.[0];
+    return node.type === "paragraph" && Object.keys(node).length === 2
+      && node.content?.length === 1 && text?.type === "text"
+      && Object.keys(text).length === 2 && "text" in text && text.text === lines[index];
+  });
+};
+
 /**
  * Recovers Markdown features that an older editor schema could not persist in
  * contentJson. The stored Markdown remains the compatibility source in that
@@ -250,6 +263,7 @@ export const resolveMemoContentDoc = (
     || docContainsNodeType(markdownDoc, EMPTY_EXTERNAL_LINK_NODE_TYPE)
     || docContainsNodeType(markdownDoc, "details")
     || docContainsNodeType(markdownDoc, SECRET_BLOCK_NODE_TYPE)
+    || (docContainsNodeType(markdownDoc, "horizontalRule") && isLegacyDesktopLineDocument(currentDoc, contentMarkdown))
     || !docToText(currentDoc)
     ? markdownDoc
     : currentDoc;
@@ -425,9 +439,9 @@ export const docToMarkdown = (doc: unknown): string => {
 
   const properties = getFrontMatterSource(doc as TiptapDoc);
   const body = properties === null ? doc : { ...doc, content: root.content.slice(1) };
-  const serializableDoc = protectLiteralDollarPairs(projectNativeUnknownContentForMarkdown(
+  const serializableDoc = protectLiteralDollarPairs(prepareImageListsForMarkdown(projectNativeUnknownContentForMarkdown(
     stripEditorOnlyNodes(body) as TiptapDoc
-  ));
+  )));
   const markdown = markdownManager
     .serialize(serializableDoc as Parameters<typeof markdownManager.serialize>[0])
     .replaceAll(LITERAL_DOLLAR_PLACEHOLDER, "\\$");

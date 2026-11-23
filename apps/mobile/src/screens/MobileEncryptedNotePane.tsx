@@ -1,3 +1,4 @@
+import type { MobileLocale } from "../lib/mobile-locale";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { AppState, Keyboard, StyleSheet, View } from "react-native";
 import { parseEncryptedNoteEnvelope, type MemoDetail, type TiptapDoc } from "@edgeever/shared";
@@ -33,7 +34,7 @@ export const MobileEncryptedNotePane = ({
   theme,
   updateMutation,
 }: {
-  locale: "zh-CN" | "en-US" | "ja" | "pl" | "ru";
+  locale: MobileLocale;
   memo: MemoDetail;
   readOnly: boolean;
   theme: "light" | "dark";

@@ -163,7 +163,8 @@ export const MobileUpdateProvider = ({ children }: { children: ReactNode }) => {
     const check = (async () => {
       try {
         setStatus("checking");
-        if (Platform.OS === "android" && await playUpdate.check(!userInitiated)) {
+        const canPrompt = userInitiated ? undefined : () => AppState.currentState !== "background";
+        if (Platform.OS === "android" && await playUpdate.check(canPrompt)) {
           return;
         }
 
@@ -262,7 +263,7 @@ export const MobileUpdateProvider = ({ children }: { children: ReactNode }) => {
       if (nextState === "active") {
         if (Platform.OS === "android" && isSupported) {
           // Recover downloads even during the normal six-hour check cooldown.
-          void playUpdate.check(false).then((handled) => {
+          void playUpdate.check().then((handled) => {
             if (!handled || playUpdate.state.status === "available") attemptAutomaticCheck();
           });
         } else {
@@ -281,9 +282,9 @@ export const MobileUpdateProvider = ({ children }: { children: ReactNode }) => {
     if (updateKind === "play") {
       if (status === "ready") {
         await completePlayUpdate();
-      } else if (status !== "downloading") {
+      } else if (AppState.currentState !== "background") {
         const result = await playUpdate.start();
-        if (result === "unavailable") openInstallUpdateOptions(installRelease);
+        if (result === "unavailable") openInstallUpdateOptions(null);
       }
       return;
     }

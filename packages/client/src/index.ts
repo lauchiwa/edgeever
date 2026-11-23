@@ -1,12 +1,16 @@
+import type { ImportMemosInput, ImportMemosResponse } from "@edgeever/shared/note-import/types";
 import type { NotebookUpdateInput } from "@edgeever/shared";
 import {
   parsePreparedAiGeneration,
   streamDirectAiGeneration,
 } from "./ai-direct-stream";
+import type { AiRunRequest } from "./ai-long-generation";
 import { throwIfAborted } from "./abort-signal";
+import { ApiRequestError, createRequestTransport, type EdgeEverClientRequestContext } from "./request-transport";
+import { createResourceTransfer, type ResourceResponse } from "./resource-transfer";
 
 import { createPluginCapabilities } from './plugin-capabilities';
-import { CLIENT_FEATURES_HEADER, downgradeSecretBlocksForStorage } from "@edgeever/shared";
+import { downgradeSecretBlocksForStorage } from "@edgeever/shared";
 import type {
   CompanionMemory,
   CompanionDiscoverySettings,
@@ -19,8 +23,19 @@ import type {
   CompanionEvent,
   CompanionToolExecuteResult,
   ApiToken,
+  TokenNotebookAccess,
+  TokenNotebookAccessLevel,
   AuthSession,
   LoginInput,
+  LoginMfaInput,
+  MfaChallenge,
+  TotpBatchConfirmInput,
+  TotpConfirmResponse,
+  TotpReauthInput,
+  TotpRecoveryCodesResponse,
+  TotpSetupResponse,
+  TotpSetupVerifyInput,
+  TotpStatus,
   LoginDeviceSession,
   InstanceUser,
   CreatedApiToken,
@@ -66,6 +81,9 @@ import type {
   AiTranscriptionStandard,
   AiPromptTemplate,
   AiPromptTemplateCreateInput,
+  AiModelConfigUpdateInput,
+  AiModelCapabilities,
+  AiModelCapabilityLimits,
   AiPromptTemplateUpdateInput,
   AiStreamEvent,
   AiGenerateInput,
@@ -81,12 +99,10 @@ import type {
   PluginPublicFetchResponse,
 } from "@edgeever/shared";
 
-export const MAX_SINGLE_REQUEST_UPLOAD_BYTES = 5 * 1024 * 1024;
-
-export type EdgeEverClientRequestContext = {
-  path: string;
-  token?: string;
-};
+export { MAX_SINGLE_REQUEST_UPLOAD_BYTES } from "./resource-transfer";
+export type { MultipartResourceUploadSource, ResourceResponse, ResourceUploadResponse } from "./resource-transfer";
+export { ApiRequestError } from "./request-transport";
+export type { ApiResponseDiagnostics, EdgeEverClientRequestContext } from "./request-transport";
 
 export type EdgeEverClientOptions = {
   baseUrl?: string | (() => string);
@@ -100,6 +116,11 @@ export type EdgeEverClientOptions = {
   allowAiServerFallback?: boolean;
   /** Used only for the model provider request; defaults to `fetch`. */
   providerFetch?: typeof fetch;
+  /**
+   * Reads the public models.dev catalogue when a model service reports no limits (#652);
+   * defaults to the global `fetch`, and `null` turns the fallback off.
+   */
+  modelCatalogFetch?: typeof fetch | null;
   beforeRequest?: (context: EdgeEverClientRequestContext) => void | Promise<void>;
   shouldAttachToken?: (path: string) => boolean;
   onUnauthorized?: (context: EdgeEverClientRequestContext) => void | Promise<void>;
@@ -107,15 +128,9 @@ export type EdgeEverClientOptions = {
   clientFeatures?: () => readonly string[];
 };
 
-export type MultipartResourceUploadSource = {
-  filename: string;
-  mimeType: string;
-  byteSize: number;
-  readPart: (start: number, end: number) => Promise<Blob | Uint8Array<ArrayBuffer>>;
-};
-
 export type InstanceHealth = {
   ok: true;
+  tableSchemaVersion?: number;
   name: string;
   runtime?: string | null;
   containerImageSource?: "official-ghcr" | "official-cn-mirror" | "custom" | "unknown" | string | null;
@@ -169,6 +184,10 @@ export type ListTagsResponse = {
 export type ListApiTokensResponse = {
   apiTokens: ApiToken[];
   availableScopes: string[];
+};
+
+export type ApiTokenUpdateResponse = {
+  apiToken: ApiToken;
 };
 
 export type InstanceStorageUsageResponse = {
@@ -261,26 +280,12 @@ export type NotebookResponse = {
   notebook: Notebook;
 };
 
-export type ResourceResponse = {
-  resource: Resource;
-};
-
-export type ResourceUploadResponse = {
-  upload: {
-    id: string;
-    resourceId: string;
-    partSize: number;
-    partCount: number;
-    byteSize: number;
-    expiresAt: string;
-  };
-};
-
 export type MarkdownExportPage = {
   memos: MemoDetail[];
   resources: Resource[];
   totalCount?: number;
   nextOffset: number | null;
+  nextCursor?: string | null;
 };
 
 export type JsonBackupPage = MarkdownExportPage & {
@@ -330,33 +335,21 @@ export type MobileSyncChange = SyncChange;
 /** @deprecated Use SyncChangesResponse; kept for mobile source compatibility. */
 export type MobileSyncChangesPage = SyncChangesResponse;
 
-export class ApiRequestError extends Error {
-  status: number;
-  code?: string;
-  details?: unknown;
-  responseDiagnostics?: ApiResponseDiagnostics;
-
-  constructor(
-    message: string,
-    status: number,
-    code?: string,
-    details?: unknown,
-    responseDiagnostics?: ApiResponseDiagnostics,
-  ) {
-    super(message);
-    this.name = "ApiRequestError";
-    this.status = status;
-    this.code = code;
-    this.details = details;
-    this.responseDiagnostics = responseDiagnostics;
-  }
-}
-
-export type ApiResponseDiagnostics = {
-  cloudflareMitigated: boolean;
-  isEdgeEverApiError: boolean;
-  rayId?: string;
+/** The second-step challenge carried by a 401 `mfa_required` login error. */
+export const getMfaChallenge = (error: unknown): MfaChallenge | null => {
+  if (!(error instanceof ApiRequestError) || error.status !== 401 || error.code !== "mfa_required") return null;
+  const details = error.details as Partial<MfaChallenge> | undefined;
+  if (!details || typeof details.challengeToken !== "string" || !details.challengeToken) return null;
+  return {
+    challengeToken: details.challengeToken,
+    expiresAt: typeof details.expiresAt === "string" ? details.expiresAt : "",
+    methods: Array.isArray(details.methods) ? details.methods : ["totp", "recovery_code"],
+  };
 };
+
+/** A recovery-code session hit a business route before rebinding TOTP. */
+export const isMfaRebindRequiredError = (error: unknown) =>
+  error instanceof ApiRequestError && error.status === 403 && error.code === "mfa_rebind_required";
 
 export type { SyncBootstrapResponse, SyncChangesResponse };
 
@@ -365,7 +358,11 @@ const withStoredSecretBlocks = <T extends { contentJson?: TiptapDoc }>(payload: 
   payload.contentJson ? { ...payload, contentJson: downgradeSecretBlocksForStorage(payload.contentJson) } : payload;
 
 export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
-  const getFetch = () => options.fetch ?? globalThis.fetch;
+  const transport = createRequestTransport(options);
+  const { getFetch, send, request, throwRequestError } = transport;
+  const resources = createResourceTransfer(transport);
+  // models.dev allows any origin, so it is read directly, never through the model relay (#652).
+  const modelCatalogFetch = () => options.modelCatalogFetch === null ? undefined : options.modelCatalogFetch ?? globalThis.fetch;
   const providerFetch = (): typeof fetch => async (url, init) => {
     const directFetch = options.providerFetch ?? getFetch();
     if (!options.allowAiServerFallback) return directFetch(url, { ...init, credentials: "omit", redirect: "error" });
@@ -385,95 +382,6 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
       return response;
     });
   };
-  const getBaseUrl = () => normalizeBaseUrl(
-    typeof options.baseUrl === "function" ? options.baseUrl() : options.baseUrl,
-  );
-  const getToken = () => {
-    const token = typeof options.token === "function" ? options.token() : options.token;
-    return token || undefined;
-  };
-
-  const send = async (
-    path: string,
-    init?: RequestInit,
-    requestOptions?: { attachToken?: boolean; setJsonContentType?: boolean },
-  ) => {
-    const token = getToken();
-    const context: EdgeEverClientRequestContext = { path, ...(token ? { token } : {}) };
-    await options.beforeRequest?.(context);
-
-    const headers = new Headers(init?.headers);
-    const attachToken = requestOptions?.attachToken
-      ?? options.shouldAttachToken?.(path)
-      ?? true;
-
-    if (token && attachToken && !headers.has("Authorization")) {
-      headers.set("Authorization", `Bearer ${token}`);
-    }
-
-    if (
-      requestOptions?.setJsonContentType !== false
-      && !(init?.body instanceof FormData)
-      && !headers.has("Content-Type")
-    ) {
-      headers.set("Content-Type", "application/json");
-    }
-
-    const clientFeatures = isAbsoluteHttpUrl(path) ? [] : options.clientFeatures?.() ?? [];
-    if (clientFeatures.length && !headers.has(CLIENT_FEATURES_HEADER)) {
-      headers.set(CLIENT_FEATURES_HEADER, clientFeatures.join(","));
-    }
-
-    const requestUrl = isAbsoluteHttpUrl(path) ? path : `${getBaseUrl()}${path}`;
-    const response = await getFetch()(requestUrl, {
-      credentials: "include",
-      ...init,
-      headers,
-    });
-
-    return { context, response };
-  };
-
-  const throwRequestError = async (
-    context: EdgeEverClientRequestContext,
-    response: Response,
-    fallbackMessage = "Request failed",
-  ): Promise<never> => {
-    const body = await response.json().catch(() => null);
-    const rayId = response.headers.get("cf-ray")?.trim();
-    const error =
-      body && typeof body === "object" && "error" in body
-        ? (body as { error?: { code?: string; message?: string; details?: unknown } }).error
-        : undefined;
-    const responseDiagnostics: ApiResponseDiagnostics = {
-      cloudflareMitigated: response.headers.get("cf-mitigated") === "challenge",
-      isEdgeEverApiError: Boolean(error && typeof error === "object"),
-      ...(rayId ? { rayId } : {}),
-    };
-
-    if (response.status === 401) {
-      void options.onUnauthorized?.(context);
-    }
-
-    throw new ApiRequestError(
-      error?.message || response.statusText || fallbackMessage,
-      response.status,
-      error?.code,
-      error?.details,
-      responseDiagnostics,
-    );
-  };
-
-  const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
-    const { context, response } = await send(path, init);
-
-    if (!response.ok) {
-      await throwRequestError(context, response);
-    }
-
-    return response.json() as Promise<T>;
-  };
-
   const requestPluginPublic = async (input: PluginPublicFetchRequest, signal?: AbortSignal): Promise<PluginPublicFetchResponse> => {
     const { context, response } = await send("/api/v1/plugins/network/fetch", {
       method: "POST",
@@ -498,180 +406,10 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
     };
   };
 
-  const requestResourceResponse = async (path: string, init?: RequestInit) => {
-    const isAbsolute = isAbsoluteHttpUrl(path);
-    const { context, response } = await send(path, init, {
-      attachToken: !isAbsolute,
-      setJsonContentType: false,
-    });
-    if (!response.ok) await throwRequestError(context, response, "Resource download failed");
-    return response;
-  };
-
-  const requestBlob = async (path: string) => (await requestResourceResponse(path)).blob();
-
   const requestArrayBuffer = async (path: string) => {
     const { context, response } = await send(path, undefined, { setJsonContentType: false });
     if (!response.ok) await throwRequestError(context, response, "Binary download failed");
     return response.arrayBuffer();
-  };
-
-  const uploadMemoResourceParts = async (memoId: string, source: MultipartResourceUploadSource) => {
-    const filename = source.filename.trim() || "attachment";
-    const mimeType = source.mimeType || "application/octet-stream";
-    const { upload } = await request<ResourceUploadResponse>(
-      `/api/v1/memos/${encodeURIComponent(memoId)}/resource-uploads`,
-      {
-        method: "POST",
-        body: JSON.stringify({ filename, mimeType, byteSize: source.byteSize }),
-      },
-    );
-
-    try {
-      for (let partNumber = 1; partNumber <= upload.partCount; partNumber += 1) {
-        const start = (partNumber - 1) * upload.partSize;
-        const chunk = await source.readPart(start, Math.min(start + upload.partSize, source.byteSize));
-        let attempt = 0;
-        while (true) {
-          try {
-            await request<{ part: { partNumber: number; byteSize: number } }>(
-              `/api/v1/resource-uploads/${encodeURIComponent(upload.id)}/parts/${partNumber}`,
-              {
-                method: "PUT",
-                headers: { "Content-Type": "application/octet-stream" },
-                body: chunk,
-              },
-            );
-            break;
-          } catch (error) {
-            attempt += 1;
-            const retryable = !(error instanceof ApiRequestError)
-              || error.status === 408
-              || error.status === 429
-              || error.status >= 500;
-            if (!retryable || attempt >= 3) throw error;
-            await new Promise((resolve) => setTimeout(resolve, attempt * 250));
-          }
-        }
-      }
-      return await request<ResourceResponse>(
-        `/api/v1/resource-uploads/${encodeURIComponent(upload.id)}/complete`,
-        { method: "POST", body: JSON.stringify({}) },
-      );
-    } catch (error) {
-      await request<{ ok: true }>(`/api/v1/resource-uploads/${encodeURIComponent(upload.id)}`, {
-        method: "DELETE",
-      }).catch(() => undefined);
-      throw error;
-    }
-  };
-
-  const uploadMemoResourceMultipart = (memoId: string, file: Blob) =>
-    uploadMemoResourceParts(memoId, {
-      filename: "name" in file && typeof file.name === "string" && file.name.trim()
-        ? file.name
-        : "attachment",
-      mimeType: file.type || "application/octet-stream",
-      byteSize: file.size,
-      readPart: async (start, end) => file.slice(start, end),
-    });
-
-  const createResourceMultipartSink = (upload: ResourceUploadResponse["upload"]) => {
-    let partNumber = 1;
-    let bufferedBytes = 0;
-    let receivedBytes = 0;
-    let chunks: ArrayBuffer[] = [];
-    let closed = false;
-
-    const abort = async () => {
-      if (closed) return;
-      closed = true;
-      chunks = [];
-      bufferedBytes = 0;
-      await request<{ ok: true }>(`/api/v1/resource-uploads/${encodeURIComponent(upload.id)}`, {
-        method: "DELETE",
-      }).catch(() => undefined);
-    };
-
-    const sendPart = async () => {
-      if (bufferedBytes === 0) return;
-      const body = new Blob(chunks, { type: "application/octet-stream" });
-      const currentPart = partNumber;
-      chunks = [];
-      bufferedBytes = 0;
-      let attempt = 0;
-      while (true) {
-        try {
-          await request<{ part: { partNumber: number; byteSize: number } }>(
-            `/api/v1/resource-uploads/${encodeURIComponent(upload.id)}/parts/${currentPart}`,
-            {
-              method: "PUT",
-              headers: { "Content-Type": "application/octet-stream" },
-              body,
-            },
-          );
-          partNumber += 1;
-          return;
-        } catch (error) {
-          attempt += 1;
-          const retryable = !(error instanceof ApiRequestError)
-            || error.status === 408
-            || error.status === 429
-            || error.status >= 500;
-          if (!retryable || attempt >= 3) throw error;
-          await new Promise((resolve) => setTimeout(resolve, attempt * 250));
-        }
-      }
-    };
-
-    return {
-      write: async (chunk: Uint8Array) => {
-        if (closed) throw new Error("Resource restore upload is closed");
-        let offset = 0;
-        while (offset < chunk.byteLength) {
-          const available = upload.partSize - bufferedBytes;
-          const length = Math.min(available, chunk.byteLength - offset);
-          const copy = new Uint8Array(length);
-          copy.set(chunk.subarray(offset, offset + length));
-          chunks.push(copy.buffer);
-          bufferedBytes += length;
-          receivedBytes += length;
-          offset += length;
-          if (bufferedBytes === upload.partSize) await sendPart();
-        }
-      },
-      close: async () => {
-        if (closed) throw new Error("Resource restore upload is closed");
-        if (receivedBytes !== upload.byteSize) {
-          await abort();
-          throw new Error(`Resource restore size mismatch: expected ${upload.byteSize}, received ${receivedBytes}`);
-        }
-        try {
-          await sendPart();
-          const result = await request<ResourceResponse>(
-            `/api/v1/resource-uploads/${encodeURIComponent(upload.id)}/complete`,
-            { method: "POST", body: JSON.stringify({}) },
-          );
-          closed = true;
-          return result;
-        } catch (error) {
-          await abort();
-          throw error;
-        }
-      },
-      abort,
-    };
-  };
-
-  const createJsonResourceRestoreSink = async (
-    resourceId: string,
-    metadata: JsonBackupMemo["resources"][number],
-  ) => {
-    const { upload } = await request<ResourceUploadResponse>(
-      `/api/v1/restores/json/resources/${encodeURIComponent(resourceId)}/uploads`,
-      { method: "POST", body: JSON.stringify(metadata) },
-    );
-    return createResourceMultipartSink(upload);
   };
 
   const runPreparedCompanion = async (
@@ -769,7 +507,7 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
 
     getInstanceRelease: () => request<InstanceRelease>("/api/release"),
 
-    getSession: () => request<AuthSession>("/api/v1/auth/session"),
+    getSession: (options?: { signal?: AbortSignal }) => request<AuthSession>("/api/v1/auth/session", options),
 
     getPublicNotebookShare: (token: string) =>
       request<{ share: PublicNotebookShare }>(`/api/public/notebook-shares/${encodeURIComponent(token)}`),
@@ -832,10 +570,10 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
       request<ListLoginDeviceSessionsResponse>("/api/v1/auth/sessions"),
 
     revokeLoginDeviceSession: (sessionId: string) =>
-      request<{ ok: true }>(`/api/v1/auth/sessions/${sessionId}`, { method: "DELETE" }),
+      request<{ ok: true }>(`/api/v1/auth/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" }),
 
     updateLoginDeviceSession: (sessionId: string, payload: { label: string | null }) =>
-      request<{ ok: true }>(`/api/v1/auth/sessions/${sessionId}`, {
+      request<{ ok: true }>(`/api/v1/auth/sessions/${encodeURIComponent(sessionId)}`, {
         method: "PATCH",
         body: JSON.stringify(payload),
       }),
@@ -845,6 +583,55 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
 
     login: (payload: LoginInput) =>
       request<AuthSession>("/api/v1/auth/login", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+
+    /** Second login step after `login` rejected with `getMfaChallenge(error)`. */
+    completeMfaLogin: (payload: LoginMfaInput) =>
+      request<AuthSession>("/api/v1/auth/login/mfa", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+
+    getTotpStatus: () => request<TotpStatus>("/api/v1/auth/totp"),
+
+    /** Starts enabling (password) or rebinding (password + code; none when restricted). */
+    startTotpSetup: (payload: TotpReauthInput) =>
+      request<TotpSetupResponse>("/api/v1/auth/totp/setup", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+
+    /** Step 2: the code for the setup this client was shown (`setupId` from `startTotpSetup`). */
+    verifyTotpSetup: (payload: TotpSetupVerifyInput) =>
+      request<TotpRecoveryCodesResponse>("/api/v1/auth/totp/setup/verify", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+
+    /** Last step: activates exactly the batch the user saved (`batchId` from `verifyTotpSetup`). */
+    confirmTotpSetup: (payload: TotpBatchConfirmInput) =>
+      request<TotpConfirmResponse>("/api/v1/auth/totp/setup/confirm", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+
+    regenerateRecoveryCodes: (payload: TotpReauthInput) =>
+      request<TotpRecoveryCodesResponse>("/api/v1/auth/totp/recovery-codes", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+
+    /** Activates exactly the batch from `regenerateRecoveryCodes`; a replaced batch answers 409. */
+    confirmRecoveryCodes: (payload: TotpBatchConfirmInput) =>
+      request<{ ok: true }>("/api/v1/auth/totp/recovery-codes/confirm", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+
+    disableTotp: (payload: TotpReauthInput) =>
+      request<{ ok: true }>("/api/v1/auth/totp/disable", {
         method: "POST",
         body: JSON.stringify(payload),
       }),
@@ -975,6 +762,13 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
     addAiModel: (providerConfigId: string, payload: { modelId: string; displayName?: string }) =>
       request<AiSettings>(`/api/v1/ai/providers/${encodeURIComponent(providerConfigId)}/models`, {
         method: "POST",
+        body: JSON.stringify(payload),
+      }),
+
+    /** Omitted fields keep their value; `null` restores the default budget. */
+    updateAiModel: (providerConfigId: string, modelConfigId: string, payload: AiModelConfigUpdateInput) =>
+      request<AiSettings>(`/api/v1/ai/providers/${encodeURIComponent(providerConfigId)}/models/${encodeURIComponent(modelConfigId)}`, {
+        method: "PATCH",
         body: JSON.stringify(payload),
       }),
 
@@ -1119,14 +913,78 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
 
     streamAiGeneration: async (payload: AiGenerateInput, streamOptions: { signal?: AbortSignal; onEvent: (event: AiStreamEvent) => void }) => {
       throwIfAborted(streamOptions.signal);
-      const { context, response } = await send("/api/v1/ai/generate/prepare", {
-        method: "POST", body: JSON.stringify(payload), signal: streamOptions.signal,
+      const prepare = async (run: AiRunRequest = { segmentation: {} }) => {
+        const { context, response } = await send("/api/v1/ai/generate/prepare", {
+          // This client can send a request without an output limit when none is known, and can run
+          // a long task in parts or continue a cut-off result (#652).
+          method: "POST", body: JSON.stringify({ ...payload, ...run, allowUnboundedOutput: true }), signal: streamOptions.signal,
+        });
+        if (response.status === 404 || response.status === 410) throw directAiUnavailable();
+        if (!response.ok) await throwRequestError(context, response);
+        const parsed = parsePreparedAiGeneration(await response.json());
+        if (!parsed) throw new ApiRequestError("The AI prepare response is invalid", 502, "ai_generation_failed");
+        return parsed;
+      };
+      let prepared = await prepare();
+      // Reporting and detecting are separate: a fresh cache is not read again, but a limit learned
+      // from a provider error is still reported so a cached value that is too high gets corrected.
+      const target = prepared.capabilityTarget;
+      const report = (limits: AiModelCapabilityLimits) => target
+        ? request(`/api/v1/ai/providers/${encodeURIComponent(target.providerConfigId)}/models/${encodeURIComponent(target.modelConfigId)}/capabilities`, {
+          method: "PUT",
+          body: JSON.stringify({
+            provider: prepared.provider,
+            modelId: prepared.modelId,
+            baseUrl: prepared.baseUrl,
+            configVersion: target.configVersion,
+            ...limits,
+          }),
+        }).then(() => true, () => false)
+        : Promise.resolve(false);
+      if (target && prepared.detectCapabilities) {
+        // The instance has no fresh limits for this model: read them from the provider once,
+        // save them for every client, and prepare again so this request already uses them.
+        const { detectAiModelCapabilities } = await import("./ai-model-capabilities-direct");
+        const limits = await detectAiModelCapabilities(prepared, providerFetch(), streamOptions.signal, { catalogFetch: modelCatalogFetch() });
+        const hasLimits = Boolean(limits && (limits.maxOutputTokens || limits.maxInputTokens || limits.contextWindowTokens));
+        if (limits && await report(limits) && hasLimits) prepared = await prepare();
+      }
+      const { runAiLongGeneration } = await import("./ai-long-generation");
+      await runAiLongGeneration({
+        first: prepared,
+        prepare,
+        signal: streamOptions.signal,
+        onEvent: streamOptions.onEvent,
+        stream: (next, onEvent) => streamDirectAiGeneration(next, payload.attachments, {
+          fetch: providerFetch(),
+          signal: streamOptions.signal,
+          // The run reports one start for all of its requests.
+          onEvent: (event) => { if (event.type !== "start") onEvent(event); },
+          onOutputLimit: async (maxOutputTokens) => {
+            if (!target) return;
+            await report({ maxOutputTokens, maxInputTokens: null, contextWindowTokens: null, source: "provider-error" });
+          },
+        }),
       });
-      if (response.status === 404 || response.status === 410) throw directAiUnavailable();
-      if (!response.ok) await throwRequestError(context, response);
-      const prepared = parsePreparedAiGeneration(await response.json());
-      if (!prepared) throw new ApiRequestError("The AI prepare response is invalid", 502, "ai_generation_failed");
-      await streamDirectAiGeneration(prepared, payload.attachments, { fetch: providerFetch(), ...streamOptions });
+    },
+
+    /** Read a saved model's limits from its provider and store them on the instance (#652). */
+    detectAiModelCapabilities: async (providerConfigId: string, modelConfigId: string, modelId: string, signal?: AbortSignal) => {
+      const credential = await request<{ provider: AiProvider; baseUrl: string; apiKey: string; configVersion: string }>(
+        `/api/v1/ai/providers/${encodeURIComponent(providerConfigId)}/direct-credential`,
+        { method: "POST", body: JSON.stringify({ modelId }), signal },
+      );
+      const { detectAiModelCapabilities } = await import("./ai-model-capabilities-direct");
+      const limits = await detectAiModelCapabilities({ ...credential, modelId }, providerFetch(), signal, { catalogFetch: modelCatalogFetch() });
+      if (!limits) return null;
+      return request<{ detectedCapabilities: AiModelCapabilities | null }>(
+        `/api/v1/ai/providers/${encodeURIComponent(providerConfigId)}/models/${encodeURIComponent(modelConfigId)}/capabilities`,
+        {
+          method: "PUT",
+          body: JSON.stringify({ provider: credential.provider, modelId, baseUrl: credential.baseUrl, configVersion: credential.configVersion, ...limits }),
+          signal,
+        },
+      );
     },
 
     listUsers: () => request<ListUsersResponse>("/api/v1/users"),
@@ -1140,13 +998,14 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
       }),
 
     updateUser: (userId: string, payload: { displayName?: string | null; password?: string; isDisabled?: boolean }) =>
-      request<UserResponse>(`/api/v1/users/${userId}`, {
+      request<UserResponse>(`/api/v1/users/${encodeURIComponent(userId)}`, {
         method: "PATCH",
         body: JSON.stringify(payload),
       }),
 
-    logout: () =>
+    logout: (options?: { signal?: AbortSignal }) =>
       request<{ ok: true }>("/api/v1/auth/logout", {
+        signal: options?.signal,
         method: "POST",
         body: JSON.stringify({}),
       }),
@@ -1189,18 +1048,18 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
       }),
 
     updateNotebook: (notebookId: string, payload: NotebookUpdateInput) =>
-      request<NotebookResponse>(`/api/v1/notebooks/${notebookId}`, {
+      request<NotebookResponse>(`/api/v1/notebooks/${encodeURIComponent(notebookId)}`, {
         method: "PATCH",
         body: JSON.stringify(payload),
       }),
 
     deleteNotebook: (notebookId: string) =>
-      request<{ ok: true }>(`/api/v1/notebooks/${notebookId}`, {
+      request<{ ok: true }>(`/api/v1/notebooks/${encodeURIComponent(notebookId)}`, {
         method: "DELETE",
       }),
 
     restoreNotebook: (notebookId: string) =>
-      request<NotebookResponse>(`/api/v1/notebooks/${notebookId}/restore`, {
+      request<NotebookResponse>(`/api/v1/notebooks/${encodeURIComponent(notebookId)}/restore`, {
         method: "POST",
       }),
 
@@ -1219,14 +1078,20 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
 
     listApiTokens: () => request<ListApiTokensResponse>("/api/v1/api-tokens"),
 
-    createApiToken: (payload: { name: string; scopes: string[]; expiresAt?: string | null }) =>
+    createApiToken: (payload: { name: string; scopes: string[]; expiresAt?: string | null; notebookAccess?: TokenNotebookAccess[] | null; notebookAccessLevel?: TokenNotebookAccessLevel }) =>
       request<CreatedApiToken>("/api/v1/api-tokens", {
         method: "POST",
         body: JSON.stringify(payload),
       }),
 
+    updateApiToken: (tokenId: string, payload: { name?: string; scopes?: string[]; expiresAt?: string | null; notebookAccess?: TokenNotebookAccess[] | null; notebookAccessLevel?: TokenNotebookAccessLevel }) =>
+      request<ApiTokenUpdateResponse>(`/api/v1/api-tokens/${encodeURIComponent(tokenId)}`, {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      }),
+
     revokeApiToken: (tokenId: string) =>
-      request<{ ok: true }>(`/api/v1/api-tokens/${tokenId}`, {
+      request<{ ok: true }>(`/api/v1/api-tokens/${encodeURIComponent(tokenId)}`, {
         method: "DELETE",
       }),
 
@@ -1284,6 +1149,10 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
       return request<ListMemosResponse>(`/api/v1/memos?${search.toString()}`);
     },
 
+    getImportCapabilities: () => request<{ protocolVersion: number; maxBatchSize: number; formats: string[]; importContext: string; accountId: string | null }>("/api/v1/imports/capabilities"),
+
+    importMemos: (payload: ImportMemosInput) => request<ImportMemosResponse>("/api/v1/imports/memos", { method: "POST", body: JSON.stringify(payload) }),
+
     createMemo: (payload: {
       notebookId: string;
       title?: string;
@@ -1318,19 +1187,19 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
       title?: string | null;
       contentMarkdown?: string;
       tags?: string[];
-    }) => request<TemplateResponse>(`/api/v1/templates/${templateId}`, {
+    }) => request<TemplateResponse>(`/api/v1/templates/${encodeURIComponent(templateId)}`, {
       method: "PATCH",
       body: JSON.stringify(payload),
     }),
 
     useTemplate: (templateId: string, notebookId: string, locale?: string) =>
-      request<MemoResponse>(`/api/v1/templates/${templateId}/use`, {
+      request<MemoResponse>(`/api/v1/templates/${encodeURIComponent(templateId)}/use`, {
         method: "POST",
         body: JSON.stringify(locale ? { notebookId, locale } : { notebookId }),
       }),
 
     deleteTemplate: (templateId: string) =>
-      request<{ ok: true }>(`/api/v1/templates/${templateId}`, { method: "DELETE" }),
+      request<{ ok: true }>(`/api/v1/templates/${encodeURIComponent(templateId)}`, { method: "DELETE" }),
 
     listScheduledTasks: (executorDeviceId?: string) => {
       const search = new URLSearchParams();
@@ -1463,23 +1332,23 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
       }
 
       const suffix = search.toString() ? `?${search.toString()}` : "";
-      return request<MemoResponse>(`/api/v1/memos/${memoId}${suffix}`);
+      return request<MemoResponse>(`/api/v1/memos/${encodeURIComponent(memoId)}${suffix}`);
     },
 
     getMemoShare: (memoId: string) =>
-      request<MemoShareResponse>(`/api/v1/memos/${memoId}/share`),
+      request<MemoShareResponse>(`/api/v1/memos/${encodeURIComponent(memoId)}/share`),
 
     listMemoShares: (offset = 0, limit = 50) =>
       request<ListMemoSharesResponse>(`/api/v1/memo-shares?offset=${offset}&limit=${limit}`),
 
     createMemoShare: (memoId: string) =>
-      request<{ share: MemoShare }>(`/api/v1/memos/${memoId}/share`, {
+      request<{ share: MemoShare }>(`/api/v1/memos/${encodeURIComponent(memoId)}/share`, {
         method: "POST",
         body: JSON.stringify({}),
       }),
 
-    updateMemoShare: (memoId: string, payload: { passwordProtected?: boolean; password?: string; slug?: string | null; showUpdatedAt?: boolean; showBranding?: boolean }) =>
-      request<{ share: MemoShare }>(`/api/v1/memos/${memoId}/share`, {
+    updateMemoShare: (memoId: string, payload: { passwordProtected?: boolean; password?: string; slug?: string | null; showUpdatedAt?: boolean; showBranding?: boolean; expiresAt?: string | null }) =>
+      request<{ share: MemoShare }>(`/api/v1/memos/${encodeURIComponent(memoId)}/share`, {
         method: "PATCH",
         body: JSON.stringify(payload),
       }),
@@ -1518,18 +1387,18 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
     },
 
     revokeMemoShare: (memoId: string) =>
-      request<{ ok: true }>(`/api/v1/memos/${memoId}/share`, { method: "DELETE" }),
+      request<{ ok: true }>(`/api/v1/memos/${encodeURIComponent(memoId)}/share`, { method: "DELETE" }),
 
     createMemoEditSession: (memoId: string) =>
-      request<{ editSession: MemoEditSession }>(`/api/v1/memos/${memoId}/edit-sessions`, {
+      request<{ editSession: MemoEditSession }>(`/api/v1/memos/${encodeURIComponent(memoId)}/edit-sessions`, {
         method: "POST",
         body: JSON.stringify({}),
       }),
 
-    listMemoRevisions: (memoId: string) => request<ListMemoRevisionsResponse>(`/api/v1/memos/${memoId}/revisions`),
+    listMemoRevisions: (memoId: string) => request<ListMemoRevisionsResponse>(`/api/v1/memos/${encodeURIComponent(memoId)}/revisions`),
 
     restoreMemoRevision: (memoId: string, revisionId: string) =>
-      request<MemoResponse>(`/api/v1/memos/${memoId}/revisions/${revisionId}/restore`, {
+      request<MemoResponse>(`/api/v1/memos/${encodeURIComponent(memoId)}/revisions/${encodeURIComponent(revisionId)}/restore`, {
         method: "POST",
         body: JSON.stringify({}),
       }),
@@ -1542,24 +1411,14 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
         body: JSON.stringify({ filename }),
       }),
 
-    updateResourceContent: (resourceId: string, file: Blob, expectedContentHash: string) => {
-      const form = new FormData();
-      form.append("file", file);
-      form.append("expectedContentHash", expectedContentHash);
-      form.append("mimeType", file.type || "application/octet-stream");
-      if (file instanceof File) form.append("filename", file.name);
-      return request<ResourceResponse>(`/api/v1/resources/${encodeURIComponent(resourceId)}/blob`, {
-        method: "PUT",
-        body: form,
-      });
-    },
+    updateResourceContent: resources.updateResourceContent,
 
     deleteResource: (resourceId: string) =>
       request<{ ok: true }>(`/api/v1/resources/${encodeURIComponent(resourceId)}`, {
         method: "DELETE",
       }),
 
-    getMarkdownExportPage: (offset = 0, limit = 50, memoIds?: string[]) => {
+    getMarkdownExportPage: (offset = 0, limit = 50, memoIds?: string[], cursor?: string) => {
       const search = new URLSearchParams({
         offset: String(offset),
         limit: String(limit),
@@ -1568,11 +1427,16 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
         search.set("ids", memoIds.join(","));
       }
       if (offset > 0) search.set("includeTotal", "0");
+      if (cursor !== undefined) search.set("cursor", cursor);
       return request<MarkdownExportPage>(`/api/v1/exports/markdown?${search.toString()}`);
     },
 
-    getJsonBackupPage: (offset = 0, limit = 25) =>
-      request<JsonBackupPage>(`/api/v1/backups/json?offset=${offset}&limit=${limit}${offset > 0 ? "&includeTotal=0" : ""}`),
+    getJsonBackupPage: (offset = 0, limit = 25, cursor?: string) => {
+      const search = new URLSearchParams({ offset: String(offset), limit: String(limit) });
+      if (offset > 0) search.set("includeTotal", "0");
+      if (cursor !== undefined) search.set("cursor", cursor);
+      return request<JsonBackupPage>(`/api/v1/backups/json?${search}`);
+    },
 
     restoreJsonNotebooks: (notebooks: JsonBackupNotebook[]) =>
       request<{ ok: true }>("/api/v1/restores/json/notebooks", {
@@ -1592,31 +1456,10 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
         body: JSON.stringify({ prompts }),
       }),
 
-    createJsonResourceRestoreSink,
-
-    restoreJsonResource: async (resourceId: string, metadata: JsonBackupMemo["resources"][number], file: Blob) => {
-      const sink = await createJsonResourceRestoreSink(resourceId, metadata);
-      const reader = file.stream().getReader();
-      try {
-        while (true) {
-          const next = await reader.read();
-          if (next.done) break;
-          await sink.write(next.value);
-        }
-        await sink.close();
-        return { ok: true as const };
-      } catch (error) {
-        await sink.abort();
-        throw error;
-      } finally {
-        reader.releaseLock();
-      }
-    },
-
-    getResourceResponse: (resourceUrl: string, init?: RequestInit) =>
-      requestResourceResponse(resourceUrl, init),
-
-    getResourceBlob: (resourceUrl: string) => requestBlob(resourceUrl),
+    createJsonResourceRestoreSink: resources.createJsonResourceRestoreSink,
+    restoreJsonResource: resources.restoreJsonResource,
+    getResourceResponse: resources.getResourceResponse,
+    getResourceBlob: resources.getResourceBlob,
 
     downloadGithubPluginAsset: (
       owner: string,
@@ -1679,28 +1522,17 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
       }>;
     },
 
-    uploadMemoResource: (memoId: string, file: Blob | FormData) => {
-      // Small files do not benefit from an upload session's three round trips.
-      // Keep large attachments on the bounded-memory, resumable path.
-      if (!(file instanceof FormData) && file.size > MAX_SINGLE_REQUEST_UPLOAD_BYTES) {
-        return uploadMemoResourceMultipart(memoId, file);
-      }
-      const form = file instanceof FormData ? file : new FormData();
-      if (!(file instanceof FormData)) {
-        const filename = "name" in file && typeof file.name === "string" && file.name.trim()
-          ? file.name
-          : "attachment";
-        form.append("file", file, filename);
-      }
-      return request<ResourceResponse>(`/api/v1/memos/${encodeURIComponent(memoId)}/resources`, {
-        method: "POST",
-        body: form,
-      });
-    },
+    uploadPublishImage: (image: Blob) => request<{ url: string }>("/api/v1/publish-images", {
+      method: "POST",
+      headers: { "Content-Type": image.type },
+      body: image,
+    }),
+
+    uploadMemoResource: resources.uploadMemoResource,
 
     claimPosterRender: () => request<{ job: null | { id: string; memoId: string; expectedRevision: number; templateId: string | null; claimToken: string; expiresAt: string } }>("/api/v1/poster-render/claim", { method: "POST", body: "{}" }),
     completePosterRender: (id: string, input: { claimToken: string; document?: import("@edgeever/shared").PosterDocument; errorCode?: "render_failed" | "revision_conflict" | "client_timeout" }) => request<{ job: { status: string } }>(`/api/v1/poster-render/${encodeURIComponent(id)}/complete`, { method: "POST", body: JSON.stringify(input) }),
-    uploadMemoResourceParts,
+    uploadMemoResourceParts: resources.uploadMemoResourceParts,
 
     updateMemo: (
       memoId: string,
@@ -1714,10 +1546,12 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
         contentJson?: TiptapDoc;
         contentMarkdown?: string;
         tags?: string[];
+        createdAt?: string;
+        updatedAt?: string;
         allowDestructiveOverwrite?: boolean;
       }
     ) =>
-      request<MemoResponse>(`/api/v1/memos/${memoId}`, {
+      request<MemoResponse>(`/api/v1/memos/${encodeURIComponent(memoId)}`, {
         method: "PATCH",
         body: JSON.stringify(withStoredSecretBlocks(payload)),
       }),
@@ -1730,13 +1564,13 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
       }
 
       const suffix = search.toString() ? `?${search.toString()}` : "";
-      return request<{ ok: true }>(`/api/v1/memos/${memoId}${suffix}`, {
+      return request<{ ok: true }>(`/api/v1/memos/${encodeURIComponent(memoId)}${suffix}`, {
         method: "DELETE",
       });
     },
 
     restoreMemo: (memoId: string) =>
-      request<MemoResponse>(`/api/v1/memos/${memoId}/restore`, {
+      request<MemoResponse>(`/api/v1/memos/${encodeURIComponent(memoId)}/restore`, {
         method: "POST",
         body: JSON.stringify({}),
       }),
@@ -1759,13 +1593,3 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
       }),
   };
 };
-
-const normalizeBaseUrl = (value?: string) => {
-  if (!value) {
-    return "";
-  }
-
-  return value.replace(/\/+$/, "");
-};
-
-const isAbsoluteHttpUrl = (value: string) => /^https?:\/\//i.test(value);

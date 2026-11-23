@@ -20,6 +20,7 @@ import {
   getMobileEditorToolbarActionLabel,
   getMobileEditorToolbarLabel,
 } from "@edgeever/shared/mobile-editor";
+import type { MobileLocale } from "../lib/mobile-locale";
 import { useEffect, useMemo, useRef } from "react";
 import type { DOMProps } from "expo/dom";
 
@@ -34,7 +35,7 @@ type Props = {
   content: TiptapDoc;
   dom?: DOMProps;
   editable: boolean;
-  locale: "zh-CN" | "en-US" | "ja" | "pl" | "ru";
+  locale: MobileLocale;
   theme: "light" | "dark";
   onChange: (doc: TiptapDoc) => Promise<void>;
   onContentError: () => Promise<void>;

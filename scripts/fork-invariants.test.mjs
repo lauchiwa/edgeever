@@ -176,7 +176,9 @@ describe("fork Android app", () => {
   // The Play listing is upstream's app, signed with another key, so it cannot
   // replace or be replaced by the fork APK.
   test("the web download menu offers the fork APK and hides Google Play", () => {
-    const pane = read("apps/web/src/components/NotebookPane.tsx");
+    expect(read("apps/web/src/components/NotebookPane.tsx")).toContain("<ClientDownloadLinks />");
+    const pane = read("apps/web/src/components/ClientDownloadLinks.tsx");
+    expect(pane).toContain("const DESKTOP_DOWNLOAD_URL = FORK_RELEASES_URL;");
     expect(pane).toContain("const ANDROID_APK_URL = FORK_RELEASES_URL;");
     expect(pane).toContain("const SHOW_ANDROID_PLAY = false;");
     expect(pane).toMatch(/\{SHOW_ANDROID_PLAY && \(\s*<DropdownMenuItem asChild>\s*<a\s+href=\{ANDROID_PLAY_URL\}/);

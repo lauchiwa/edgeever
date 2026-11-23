@@ -99,6 +99,17 @@ describe("public memo share pages", () => {
     expect(html).not.toContain("old description");
   });
 
+  test("marks the note's language as unknown and the generated text as English", async () => {
+    const html = await (await render(createDatabase(), `/share/${token}`)).text();
+    // The app shell still declares its own language; the note must not inherit it.
+    expect(html).toContain('<html lang="zh-CN">');
+    expect(html).toContain('<h1 lang="">A $&amp; $&#39; $$ &lt;script&gt;</h1>');
+    expect(html).toContain('<pre lang="" style="white-space:pre-wrap;font:inherit"># A $&amp; $&#39; $$ &lt;script&gt;');
+    expect(html).toContain('<p lang="en" style="font-size:.75rem;color:#64748b">Updated <time ');
+    expect(html).toContain('<footer lang="en" style="');
+    expect(html).not.toContain("old description");
+  });
+
   test.each([[true, true], [true, false], [false, true], [false, false]])(
     "independently renders update time (%s) and footer branding (%s) in the first HTML response",
     async (showUpdatedAt, showBranding) => {
@@ -110,7 +121,7 @@ describe("public memo share pages", () => {
         expect(html.includes("<time ")).toBe(showUpdatedAt);
         expect(html.includes("Published with EdgeEver</a>")).toBe(showBranding);
         if (showBranding) {
-          expect(html).toContain('<footer style="');
+          expect(html).toContain('<footer lang="en" style="');
           expect(html).toContain('href="https://edgeever.org/"');
           expect(html.indexOf("<footer ")).toBeGreaterThan(html.indexOf("</pre>"));
         }
@@ -206,6 +217,7 @@ describe("public memo share pages", () => {
     const html = await (await render(sqlite, `/share/${token}`)).text();
     expect(html).not.toContain("无标题笔记");
     expect(html).toContain("<title>Shared note · EdgeEver</title>");
+    expect(html).toContain('<h1 lang="en">Shared note</h1>');
     expect(html).toContain('<meta property="og:title" content="Shared note">');
     expect(html).toContain('<meta name="twitter:title" content="Shared note">');
     expect(html).toContain("Body text");
@@ -232,5 +244,54 @@ describe("public memo share pages", () => {
     expect(selfHosted).toContain("renderPublicMemoSharePage");
     expect(wrangler).toContain('"/share/*"');
     expect(webConfig).toContain("!/^\\/(?:share|s)\\//.test(url.pathname)");
+  });
+});
+
+describe("expiring and counted share pages", () => {
+  const viewCount = (sqlite) => sqlite.query("SELECT view_count FROM memo_shares WHERE token = ?").get(token).view_count;
+
+  test("an expired link serves neither markdown nor the note in HTML", async () => {
+    const sqlite = createDatabase();
+    try {
+      sqlite.query("UPDATE memo_shares SET expires_at = '2020-01-01T00:00:00.000Z' WHERE token = ?").run(token);
+      const markdown = await render(sqlite, `/share/${token}.md`);
+      expect(markdown.status).toBe(410);
+      expect(await markdown.text()).toBe("This shared link has expired.\n");
+
+      const html = await render(sqlite, `/share/${token}`);
+      const page = await html.text();
+      expect(page).not.toContain("Hello");
+      expect(page).not.toContain("edgeever-shared-note");
+      expect(page).toContain("This shared link has expired.");
+      expect(html.headers.get("Link")).toBeNull();
+      expect(viewCount(sqlite)).toBe(0);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  test("a future expiry keeps the page readable", async () => {
+    const sqlite = createDatabase();
+    try {
+      sqlite.query("UPDATE memo_shares SET expires_at = '2999-01-01T00:00:00.000Z' WHERE token = ?").run(token);
+      expect((await render(sqlite, `/share/${token}.md`)).status).toBe(200);
+      expect(await (await render(sqlite, `/share/${token}`)).text()).toContain("edgeever-shared-note");
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  test("counts markdown reads but not the HTML shell or HEAD requests", async () => {
+    const sqlite = createDatabase();
+    try {
+      await render(sqlite, `/share/${token}`);
+      expect(viewCount(sqlite)).toBe(0);
+      await renderPublicMemoSharePage(new Request(`https://note.example/share/${token}.md`, { method: "HEAD" }), dbOf(sqlite), async () => new Response(shell));
+      expect(viewCount(sqlite)).toBe(0);
+      expect((await render(sqlite, `/share/${token}.md`)).status).toBe(200);
+      expect(viewCount(sqlite)).toBe(1);
+    } finally {
+      sqlite.close();
+    }
   });
 });

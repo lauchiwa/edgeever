@@ -1,0 +1,22 @@
+{
+  "icons": {
+    "notion.png": {
+      "source": "https://www.notion.so/images/favicon.ico"
+    },
+    "siyuan.png": {
+      "source": "https://raw.githubusercontent.com/siyuan-note/siyuan/master/app/src/assets/icon.png"
+    },
+    "flomo.png": {
+      "source": "https://flomoapp.com/images/logo-192x192.png"
+    },
+    "evernote.svg": {
+      "source": "https://evernote.com/images/evernote-logo-icon.svg"
+    },
+    "obsidian.svg": {
+      "source": "https://obsidian.md/images/obsidian-logo-gradient.svg"
+    },
+    "joplin.svg": {
+      "source": "https://raw.githubusercontent.com/laurent22/joplin/dev/Assets/JoplinIcon.svg"
+    }
+  }
+}

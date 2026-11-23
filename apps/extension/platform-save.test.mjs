@@ -51,7 +51,7 @@ const harness = (options = {}) => {
       return value;
     }});
   }
-  const calls = { creates: [], uploads: [], saves: [], injections: [], feedback: [], requests: [], rejectedMessages: [], imageRules: [] };
+  const calls = { creates: [], uploads: [], saves: [], injections: [], feedback: [], requests: [], rejectedMessages: [], imageRules: [], optionsOpened: 0 };
   let doubanImageRule=false, sspaiImageRule=false;
   let onMessage, onClick, menuDone;
   const json = (value, status = 200) => Response.json(value, { status });
@@ -63,7 +63,7 @@ const harness = (options = {}) => {
         options.notebookRequested?.();
         if (options.notebookGate) await options.notebookGate;
         if (options.navigateDuringNotebookLookup) currentUrl = "https://www.v2ex.com/t/1000001";
-        return json({ notebooks: [{ id: "nb_inbox", slug: "inbox" }] });
+        return json({ notebooks: options.emptyNotebooks ? [] : [{ id: "nb_inbox", slug: "inbox" }] });
       }
       if (path === "/api/v1/memos") {
         calls.creates.push(JSON.parse(init.body));
@@ -84,12 +84,12 @@ const harness = (options = {}) => {
   };
   let pageContext, selectionContext, onInstalled;
   const chrome = {
-    i18n: { getMessage: (key, substitution) => key === "saveFailedWithReason" ? `${key}: ${substitution}` : key },
+    i18n: { getMessage: (key, substitution) => options.messages?.[key] ?? (key === "saveFailedWithReason" ? `${key}: ${substitution}` : key) },
     runtime: {
       id: "extension-under-test",
       getURL: path=>`chrome-extension://extension-under-test/${path.replace(/^\/+/, '')}`,
       onInstalled: { addListener(listener) { onInstalled = listener; } }, onMessage: { addListener(listener) { onMessage = listener; } },
-      openOptionsPage: async () => {},
+      openOptionsPage: async () => { calls.optionsOpened += 1; },
       sendMessage: async (message) => {
         if (options.spoofMessages && message.type === "pagePlatformRead") {
           for (const overrides of [{ tab: { id: 999 } }, { frameId: 3 }, { id: "other-extension" }]) {
@@ -102,7 +102,7 @@ const harness = (options = {}) => {
         onMessage(message, { id: chrome.runtime.id, tab: { id: 7 }, frameId: 0, url: options.senderUrl || currentUrl }, () => {});
       },
     },
-    storage: { local: { get: async () => ({ instanceUrl: "https://edgeever.test", token: "test-token", notebookId: "" }) } },
+    storage: { local: { get: async () => ({ instanceUrl: "https://edgeever.test", token: options.missingConfig ? "" : "test-token", notebookId: "" }) } },
     permissions: { contains: async () => !options.denyInstance },
     declarativeNetRequest: { updateSessionRules:async update=>{
       calls.imageRules.push(update);
@@ -363,6 +363,51 @@ test("a new platform toolbar still saves a valid selection instead of its full a
   expect(h.calls.creates[0].contentMarkdown).not.toContain("环境不好");
 });
 
+for(const [fixture,imageCount] of [["wechat-pictures",5],["wechat-pictures-ten",10],["wechat-pictures-no-heading",6]]) {
+  for(const entry of ["toolbar","menu"]) test(`WeChat ${fixture} ${entry} saves every original picture through the existing attachment pipeline`,async()=>{
+    const doc=createDocument(readFileSync(new URL(`./fixtures/platforms/${fixture}.html`,import.meta.url),'utf8'));
+    const pageUrl=doc.querySelector('meta[property="og:url"]').getAttribute('content');
+    const declared=JSON.parse(doc.querySelector('#wechat-picture-state').textContent);
+    const h=harness({platform:'wechat',fixture,pageUrl,prepare:(_doc,window)=>{window.cgiDataNew=declared;}});
+    const result=await h[entry]();expect(entry==='toolbar' ? result.ok : result.kind).toBe(entry==='toolbar' ? true : 'success');
+    expect(h.calls.creates).toHaveLength(1);expect(h.calls.creates[0].title).toBe(doc.querySelector('.rich_media_title')?.textContent || doc.querySelector('meta[property="og:title"]').getAttribute('content'));
+    expect(h.calls.creates[0].tags).toEqual(['web-clip','wechat']);
+    expect(h.calls.uploads).toHaveLength(imageCount);expect(h.calls.saves).toHaveLength(1);
+    const markdown=h.calls.saves[0].contentMarkdown;
+    expect([...markdown.matchAll(/!\[[^\]]*\]\(([^)]+)\)/g)].map(m=>m[1])).toEqual(Array.from({length:imageCount},(_,i)=>`/api/v1/resources/res_${i+1}/blob`));
+    expect(markdown).not.toContain('收录于推荐合集');expect(markdown).not.toContain('account-avatar.png');
+  });
+}
+
+test("WeChat reads the full declared gallery rather than the site's twenty-picture preview",async()=>{
+  const h=harness({platform:'wechat',fixture:'wechat-pictures',pageUrl:'https://mp.weixin.qq.com/s/FXFDv4PbDrq3ueGLVWU0-A',prepare:(doc,window)=>{
+    const data=JSON.parse(doc.querySelector('#wechat-picture-state').textContent);
+    data.picture_page_info_list=Array.from({length:21},(_,i)=>({cdn_url:`https://example.test/gallery/${i}.png`}));
+    window.cgiDataNew=data;window.picture_page_info_list=data.picture_page_info_list.slice(0,20);
+  }});
+  expect((await h.toolbar()).ok).toBe(true);expect(h.calls.uploads).toHaveLength(21);
+});
+
+test("WeChat malformed picture state fails before creating a note",async()=>{
+  for(const data of [undefined,{picture_page_info_list:[]},{link:urls.wechat,picture_page_info_list:[{cdn_url:'https://example.test/first.png'},{}]}]) {
+    const h=harness({platform:'wechat',fixture:'wechat-pictures',pageUrl:'https://mp.weixin.qq.com/s/FXFDv4PbDrq3ueGLVWU0-A',prepare:(_doc,window)=>{window.cgiDataNew=data;}});
+    expect((await h.toolbar()).ok).toBe(false);expect(h.calls.creates).toHaveLength(0);expect(h.calls.uploads).toHaveLength(0);
+  }
+});
+
+test("WeChat conflicting declared aliases fail before saving, while matching aliases still archive the gallery",async()=>{
+  const pageUrl='https://mp.weixin.qq.com/s?__biz=MzA%3D%3D&mid=123&idx=1&sn=abc';
+  for(const conflict of [false,true]) {
+    const h=harness({platform:'wechat',fixture:'wechat-pictures',pageUrl,prepare:(doc,window)=>{
+      const data=JSON.parse(doc.querySelector('#wechat-picture-state').textContent);
+      if(conflict)data.link=urls.wechat;window.cgiDataNew=data;
+    }});
+    const result=await h.toolbar();expect(result.ok).toBe(!conflict);
+    expect(h.calls.creates).toHaveLength(conflict ? 0 : 1);expect(h.calls.uploads).toHaveLength(conflict ? 0 : 5);
+    if(conflict)expect(result.message).toBe('platformPageChanged');
+  }
+});
+
 test("Xiaoyuzhou saves the current client route using MAIN-world props while bootstrap JSON stays old", async () => {
   const id = "6a8ef24e1352af56ff3c83f3";
   const pageUrl = `https://www.xiaoyuzhoufm.com/episode/${id}`;
@@ -441,6 +486,19 @@ for (const [option, message] of [["denyInstance", "instancePermissionRequired"],
   });
 }
 
+test("menu feedback opens settings by error code even when translations are identical", async () => {
+  const messages = {
+    completePluginConfiguration: "Check your settings",
+    instancePermissionRequired: "Check your settings",
+    noAvailableNotebooks: "Check your settings",
+  };
+  for (const option of ["missingConfig", "denyInstance", "emptyNotebooks"]) {
+    const h = harness({ [option]: true, messages });
+    expect(await h.menu()).toMatchObject({ kind: "error", message: "Check your settings" });
+    expect(h.calls.optionsOpened).toBe(option === "emptyNotebooks" ? 0 : 1);
+    expect(h.calls.creates).toHaveLength(0);
+  }
+});
 
 for (const navigate of [false, true]) test(`a stale sender URL after SPA navigation ${navigate ? "still cancels real navigation" : "does not reject the current post"}`, async () => {
   const h = harness({ platform: "linkedin", senderUrl: "https://www.linkedin.com/posts/previous-activity-123-test", navigateDuringNotebookLookup: navigate });

@@ -4,18 +4,27 @@ actor APIClient {
     private(set) var baseURL: URL
     private(set) var token: String?
     private var onUnauthorized: (@Sendable () -> Void)?
+    private var onMfaRebindRequired: (@Sendable () -> Void)?
 
     private let session: URLSession
+    /// The models.dev fallback for model limits (#652); `nil` turns it off.
+    private let modelCatalog: ModelsDevCatalog?
+    /// The longest a generation waits for model limit detection before going on without it (#652).
+    private let capabilityDetectionTimeout: TimeInterval
 
     init(
         baseURL: URL,
         token: String? = nil,
         session: URLSession = .shared,
+        modelCatalog: ModelsDevCatalog? = .shared,
+        capabilityDetectionTimeout: TimeInterval = AiModelCapabilityDetector.defaultTimeout,
         onUnauthorized: (@Sendable () -> Void)? = nil
     ) {
         self.baseURL = baseURL.edgeEverNormalizedBase
         self.token = token
         self.session = session
+        self.modelCatalog = modelCatalog
+        self.capabilityDetectionTimeout = capabilityDetectionTimeout
         self.onUnauthorized = onUnauthorized
     }
 
@@ -31,6 +40,12 @@ actor APIClient {
         onUnauthorized = handler
     }
 
+    /// Called when a business API answers 403 `mfa_rebind_required` (restricted
+    /// recovery-code session). The UI must switch to the forced rebind screen.
+    func setOnMfaRebindRequired(_ handler: (@Sendable () -> Void)?) {
+        onMfaRebindRequired = handler
+    }
+
     // MARK: - Instance diagnostics
 
     func getInstanceHealth() async throws -> InstanceHealth {
@@ -43,8 +58,56 @@ actor APIClient {
 
     // MARK: - Auth
 
+    /// Password step. When TOTP is enabled the server answers 401 `mfa_required`;
+    /// that surfaces as `APIError.mfaChallenge` and is never treated as session loss.
     func login(_ input: LoginInput) async throws -> AuthSession {
-        try await request(path: "/api/v1/auth/login", method: "POST", body: input)
+        try await request(path: "/api/v1/auth/login", method: "POST", body: input, notifyUnauthorized: false)
+    }
+
+    /// Second login step (TOTP code or recovery code). 401s here are inline errors.
+    func completeMfaLogin(_ input: LoginMfaInput) async throws -> AuthSession {
+        try await request(path: "/api/v1/auth/login/mfa", method: "POST", body: input, notifyUnauthorized: false)
+    }
+
+    // MARK: - TOTP
+
+    func getTotpStatus() async throws -> TotpStatus {
+        try await request(path: "/api/v1/auth/totp")
+    }
+
+    /// Body: `{password}` (enable), `{password, code|recoveryCode}` (voluntary rebind)
+    /// or `{}` (restricted session).
+    func startTotpSetup(_ input: TotpReauthInput) async throws -> TotpSetupResponse {
+        try await request(path: "/api/v1/auth/totp/setup", method: "POST", body: input)
+    }
+
+    /// Step 2: the code for the setup this client was shown. A setup replaced by a
+    /// newer one (another tab or device of the same session) answers 409 `totp_setup_expired`.
+    func verifyTotpSetup(setupId: String, code: String) async throws -> TotpRecoveryCodesResponse {
+        struct Body: Encodable { var setupId: String; var code: String }
+        return try await request(path: "/api/v1/auth/totp/setup/verify", method: "POST", body: Body(setupId: setupId, code: code))
+    }
+
+    /// Last step: activates exactly the batch of recovery codes the user saved.
+    func confirmTotpSetup(batchId: String) async throws -> TotpConfirmResponse {
+        try await request(path: "/api/v1/auth/totp/setup/confirm", method: "POST", body: TotpBatchBody(batchId: batchId))
+    }
+
+    func regenerateRecoveryCodes(_ input: TotpReauthInput) async throws -> TotpRecoveryCodesResponse {
+        try await request(path: "/api/v1/auth/totp/recovery-codes", method: "POST", body: input)
+    }
+
+    /// Activates exactly the batch from `regenerateRecoveryCodes`; a replaced batch answers 409.
+    func confirmRecoveryCodes(batchId: String) async throws {
+        let _: OkResponse = try await request(
+            path: "/api/v1/auth/totp/recovery-codes/confirm",
+            method: "POST",
+            body: TotpBatchBody(batchId: batchId)
+        )
+    }
+
+    func disableTotp(_ input: TotpReauthInput) async throws {
+        let _: OkResponse = try await request(path: "/api/v1/auth/totp/disable", method: "POST", body: input)
     }
 
     func logout() async throws {
@@ -229,7 +292,7 @@ actor APIClient {
             modelId: prepared.modelId, system: prepared.system, prompt: prepared.prompt, maxOutputTokens: prepared.maxOutputTokens,
             resultBoundary: AiGenerationResultBoundary(start: "", end: ""))
         let providerRequest = try AiDirectStream.providerRequest(for: generation)
-        let (bytes, response) = try await session.bytes(for: providerRequest)
+        let (bytes, response) = try await session.bytes(for: providerRequest, delegate: AiProviderRedirects.reject)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw APIError(status: (response as? HTTPURLResponse)?.statusCode ?? 502, code: "ai_tag_suggestions_failed", message: "The model request failed.")
         }
@@ -245,11 +308,48 @@ actor APIClient {
 
     func streamAiGeneration(_ input: AiGenerateInput) -> AsyncThrowingStream<AiStreamEvent, Error> {
         let session = self.session
+        let modelCatalog = self.modelCatalog
+        let detectionTimeout = self.capabilityDetectionTimeout
         return AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    let prepared: AiPreparedGeneration = try await self.request(path: "/api/v1/ai/generate/prepare", method: "POST", body: input)
-                    try await Self.streamDirectProvider(prepared, session: session, continuation: continuation)
+                    // This client can run a long task in parts or continue a cut-off result (#652 PR B).
+                    var first = input
+                    first.segmentation = AiSegmentationRequest()
+                    var prepared: AiPreparedGeneration = try await self.request(path: "/api/v1/ai/generate/prepare", method: "POST", body: first)
+                    // Reporting and detecting are separate: a fresh cache is not read again, but a limit
+                    // learned from a provider error is still reported so a cached value that is too high
+                    // gets corrected (#652).
+                    let target = prepared.capabilityTarget
+                    if let target, prepared.detectCapabilities == true {
+                        // The instance has no fresh limits for this model: read them from the provider once,
+                        // save them for every client, and prepare again so this request already uses them.
+                        // Unknown or slow metadata (nil) changes nothing: this request uses the first prepare.
+                        let limits = try await AiModelCapabilityDetector.detect(
+                            .init(provider: prepared.provider, baseUrl: prepared.baseUrl, apiKey: prepared.apiKey, modelId: prepared.modelId),
+                            session: session,
+                            catalog: modelCatalog,
+                            timeout: detectionTimeout
+                        )
+                        if let limits, await self.reportCapabilities(limits, for: prepared, target: target), limits.hasLimits {
+                            prepared = try await self.request(path: "/api/v1/ai/generate/prepare", method: "POST", body: first)
+                        }
+                    }
+                    let reportOutputLimit: (@Sendable (AiPreparedGeneration, Int) async -> Void)? = target.map { target in
+                        { @Sendable next, maxOutputTokens in
+                            let limits = AiModelCapabilityLimits(maxOutputTokens: maxOutputTokens, maxInputTokens: nil, contextWindowTokens: nil, source: "provider-error")
+                            _ = await self.reportCapabilities(limits, for: next, target: target)
+                        }
+                    }
+                    try await AiLongGeneration.run(
+                        input: input,
+                        first: prepared,
+                        prepare: { next in try await self.request(path: "/api/v1/ai/generate/prepare", method: "POST", body: next) },
+                        stream: { next, emit in
+                            try await Self.streamDirectProvider(next, session: session, emit: emit, onOutputLimit: reportOutputLimit)
+                        },
+                        emit: { event in continuation.yield(event) }
+                    )
                     continuation.finish()
                 } catch { continuation.finish(throwing: error) }
             }
@@ -257,23 +357,75 @@ actor APIClient {
         }
     }
 
-    private static func streamDirectProvider(
+    /// Save limits read for the model a prepare used (#652). Returns whether the instance accepted them;
+    /// an older instance, or a model or service that changed meanwhile, rejects them, which is harmless.
+    func reportCapabilities(_ limits: AiModelCapabilityLimits, for prepared: AiPreparedGeneration, target: AiModelCapabilityTarget) async -> Bool {
+        struct Report: Encodable {
+            var provider: String
+            var modelId: String
+            var baseUrl: String
+            var configVersion: String
+            var limits: AiModelCapabilityLimits
+            private enum CodingKeys: String, CodingKey { case provider, modelId, baseUrl, configVersion }
+            func encode(to encoder: Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encode(provider, forKey: .provider)
+                try container.encode(modelId, forKey: .modelId)
+                try container.encode(baseUrl, forKey: .baseUrl)
+                try container.encode(configVersion, forKey: .configVersion)
+                try limits.encode(to: encoder)
+            }
+        }
+        struct Accepted: Decodable {}
+        let segment = AiModelCapabilityDetector.pathSegment
+        let path = "/api/v1/ai/providers/\(segment(target.providerConfigId))/models/\(segment(target.modelConfigId))/capabilities"
+        let report = Report(provider: prepared.provider, modelId: prepared.modelId, baseUrl: prepared.baseUrl, configVersion: target.configVersion, limits: limits)
+        do {
+            let _: Accepted = try await request(path: path, method: "PUT", body: report)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    static func streamDirectProvider(
         _ prepared: AiPreparedGeneration,
         session: URLSession,
-        continuation: AsyncThrowingStream<AiStreamEvent, Error>.Continuation
+        emit: @Sendable (AiStreamEvent) -> Void,
+        onOutputLimit: (@Sendable (AiPreparedGeneration, Int) async -> Void)? = nil,
+        retried: Bool = false
     ) async throws {
         let request = try AiDirectStream.providerRequest(for: prepared)
-        let (bytes, response) = try await session.bytes(for: request)
+        // The request carries the model key: never follow a redirect (#652).
+        let (bytes, response) = try await session.bytes(for: request, delegate: AiProviderRedirects.reject)
         guard let http = response as? HTTPURLResponse else {
             throw APIError(status: -1, code: nil, message: "Invalid response")
+        }
+        if (300 ..< 400).contains(http.statusCode) {
+            // Redirects are refused because the request carries the model key (#652).
+            throw APIError(
+                status: http.statusCode,
+                code: "ai_generation_failed",
+                message: "The model service redirected this request (HTTP \(http.statusCode)). Set the service's Base URL to its final address."
+            )
         }
         guard (200 ..< 300).contains(http.statusCode) else {
             var data = Data()
             for try await byte in bytes { data.append(byte) }
             let raw = String(data: data, encoding: .utf8) ?? HTTPURLResponse.localizedString(forStatusCode: http.statusCode)
+            // The provider rejected the requested output limit and said what it accepts. Nothing was
+            // generated or streamed yet, so retry once with that limit and report it (#652).
+            if http.statusCode == 400, !retried, let accepted = AiModelCapabilityParser.outputLimit(fromError: raw),
+               prepared.maxOutputTokens.map({ accepted < $0 }) ?? true {
+                await onOutputLimit?(prepared, accepted)
+                var next = prepared
+                next.maxOutputTokens = accepted
+                try await streamDirectProvider(next, session: session, emit: emit, onOutputLimit: onOutputLimit, retried: true)
+                return
+            }
             throw APIError(status: http.statusCode, code: "ai_generation_failed", message: String(raw.prefix(1000)))
         }
-        continuation.yield(AiStreamEvent(type: "start", text: nil, code: nil, message: nil, finishReason: nil, inputTokens: nil, outputTokens: nil))
+        emit(AiStreamEvent(type: "start", text: nil, code: nil, message: nil, finishReason: nil, inputTokens: nil, outputTokens: nil))
         let normalizer = AiGenerationStreamNormalizer(resultBoundary: prepared.resultBoundary)
         var hasContent = false
         var finishReason: String?
@@ -293,18 +445,23 @@ actor APIClient {
             let text = normalizer.push(delta.text)
             if text.isEmpty { continue }
             hasContent = hasContent || !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            continuation.yield(AiStreamEvent(type: "text-delta", text: text, code: nil, message: nil, finishReason: nil, inputTokens: nil, outputTokens: nil))
+            emit(AiStreamEvent(type: "text-delta", text: text, code: nil, message: nil, finishReason: nil, inputTokens: nil, outputTokens: nil))
         }
         let trailing = normalizer.finish()
         if !trailing.isEmpty {
             hasContent = hasContent || !trailing.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            continuation.yield(AiStreamEvent(type: "text-delta", text: trailing, code: nil, message: nil, finishReason: nil, inputTokens: nil, outputTokens: nil))
+            emit(AiStreamEvent(type: "text-delta", text: trailing, code: nil, message: nil, finishReason: nil, inputTokens: nil, outputTokens: nil))
         }
         if !hasContent {
-            continuation.yield(AiStreamEvent(type: "error", text: nil, code: "ai_generation_failed", message: "The AI did not return a note result.", finishReason: nil, inputTokens: nil, outputTokens: nil))
+            emit(AiStreamEvent(type: "error", text: nil, code: "ai_generation_failed", message: "The AI did not return a note result.", finishReason: nil, inputTokens: nil, outputTokens: nil))
             return
         }
-        continuation.yield(AiStreamEvent(type: "finish", text: nil, code: nil, message: nil, finishReason: finishReason, inputTokens: inputTokens, outputTokens: outputTokens))
+        switch AiDirectStream.streamEnd(finishReason: finishReason, normalizer: normalizer) {
+        case .interrupted:
+            emit(AiStreamEvent(type: "error", text: nil, code: "ai_stream_interrupted", message: "The connection ended before the AI finished.", finishReason: nil, inputTokens: nil, outputTokens: nil))
+        case .finished(let truncated):
+            emit(AiStreamEvent(type: "finish", text: nil, code: nil, message: nil, finishReason: finishReason, inputTokens: inputTokens, outputTokens: outputTokens, truncated: truncated))
+        }
     }
 
     // MARK: - Templates
@@ -669,12 +826,14 @@ actor APIClient {
     // MARK: - Core request
 
     private struct EmptyBody: Encodable {}
+    private struct TotpBatchBody: Encodable { var batchId: String }
 
     private func request<T: Decodable>(
         path: String,
         method: String = "GET",
         query: [URLQueryItem] = [],
-        body: (any Encodable)? = nil
+        body: (any Encodable)? = nil,
+        notifyUnauthorized: Bool = true
     ) async throws -> T {
         var request = URLRequest(url: makeURL(path: path, query: query))
         request.httpMethod = method
@@ -686,7 +845,7 @@ actor APIClient {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try EdgeEverJSON.encoder.encode(AnyEncodable(body))
         }
-        let data = try await performRaw(request)
+        let data = try await performRaw(request, notifyUnauthorized: notifyUnauthorized)
         return try EdgeEverJSON.decoder.decode(T.self, from: data)
     }
 
@@ -695,20 +854,50 @@ actor APIClient {
         return try EdgeEverJSON.decoder.decode(ResourceResponse.self, from: data)
     }
 
-    private func performRaw(_ request: URLRequest) async throws -> Data {
+    private func performRaw(_ request: URLRequest, notifyUnauthorized: Bool = true) async throws -> Data {
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else {
             throw APIError(status: -1, code: nil, message: "Invalid response")
         }
-        if http.statusCode == 401 {
+        if http.statusCode == 401, notifyUnauthorized {
             onUnauthorized?()
         }
         guard (200 ..< 300).contains(http.statusCode) else {
-            let message = Self.parseErrorMessage(data: data) ?? HTTPURLResponse.localizedString(forStatusCode: http.statusCode)
-            let code = Self.parseErrorCode(data: data)
-            throw APIError(status: http.statusCode, code: code, message: message)
+            let error = Self.decodeAPIError(
+                status: http.statusCode,
+                data: data,
+                retryAfter: http.value(forHTTPHeaderField: "Retry-After")
+            )
+            if error.isMfaRebindRequired {
+                onMfaRebindRequired?()
+            }
+            throw error
         }
         return data
+    }
+
+    /// Build an `APIError` from an `{ "error": { code, message, details? } }` body.
+    static func decodeAPIError(status: Int, data: Data, retryAfter: String? = nil) -> APIError {
+        let message = parseErrorMessage(data: data) ?? HTTPURLResponse.localizedString(forStatusCode: status)
+        let code = parseErrorCode(data: data)
+        var challenge: MfaChallenge?
+        if code == "mfa_required" {
+            struct Envelope: Decodable {
+                struct Body: Decodable { var details: MfaChallenge? }
+                var error: Body
+            }
+            challenge = (try? EdgeEverJSON.decoder.decode(Envelope.self, from: data))?.error.details
+        }
+        let retrySeconds = retryAfter
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .flatMap { Int($0) }
+        return APIError(
+            status: status,
+            code: code,
+            message: message,
+            mfaChallenge: challenge,
+            retryAfterSeconds: retrySeconds
+        )
     }
 
     private func makeURL(path: String, query: [URLQueryItem] = []) -> URL {
@@ -749,9 +938,14 @@ struct APIError: Error, LocalizedError, Equatable, Sendable {
     let status: Int
     let code: String?
     let message: String
+    /// Present when the login password step answered 401 `mfa_required`.
+    var mfaChallenge: MfaChallenge? = nil
+    /// Parsed `Retry-After` header (seconds) for 429 responses.
+    var retryAfterSeconds: Int? = nil
 
     var errorDescription: String? { message }
     var isUnauthorized: Bool { status == 401 }
+    var isMfaRebindRequired: Bool { status == 403 && code == "mfa_rebind_required" }
     var isRevisionConflict: Bool { code == "revision_conflict" || status == 409 }
     /// Server has no **memo** row for this id (update / edit-session).
     /// Tight match only — never treat notebook/resource/workspace "not found" as memo 404.

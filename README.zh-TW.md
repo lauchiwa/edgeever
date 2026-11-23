@@ -3,28 +3,30 @@
     <img src="assets/brand/edgeever-icon.svg" alt="EdgeEver Logo" width="48" align="absmiddle" /> EdgeEver
   </h1>
   <p>
-    <b>AI 原生知識庫與 Evernote / Obsidian 替代方案，支援多端瞬時同步與原生 MCP。Cloudflare 免費代管或 Docker 自行託管</b>
+    <b>AI 原生筆記應用與 Evernote / Obsidian 替代方案。支援全平台瞬時同步、多形態富筆記（多維表格、心智圖、圖表、海報）、網頁擷取與原生 MCP。Cloudflare 100% 免費代管或 Docker 自行託管。</b>
   </p>
   <p>
     <a href="https://github.com/tianma-if/edgeever/stargazers"><img src="https://img.shields.io/github/stars/tianma-if/edgeever?style=social" alt="GitHub Stars" /></a>
     <a href="https://github.com/tianma-if/edgeever/network/members"><img src="https://img.shields.io/github/forks/tianma-if/edgeever?style=social" alt="GitHub Forks" /></a>
-    <a href="https://github.com/tianma-if/edgeever"><img src="https://img.shields.io/badge/Git_Clones-40K%2B%20%2F%2014d-brightgreen?style=social&logo=git" alt="Git 克隆量" /></a>
+    <a href="https://github.com/tianma-if/edgeever/releases"><img src="https://img.shields.io/github/downloads/tianma-if/edgeever/total?style=social&amp;logo=github&amp;label=Release%20Downloads" alt="GitHub Release 附件下載量" /></a>
     <a href="https://github.com/tianma-if/edgeever/pkgs/container/edgeever"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fghcr-badge.elias.eu.org%2Fapi%2Ftianma-if%2Fedgeever%2Fedgeever&query=downloadCount&style=social&logo=docker&label=Docker%20Pulls" alt="Docker Pulls" /></a>
     <a href="https://www.producthunt.com/products/edgeever?utm_source=other&utm_medium=social"><img src="https://img.shields.io/badge/Product%20Hunt-ea532a?style=social&logo=product-hunt" alt="Product Hunt" /></a>
     <a href="https://hellogithub.com/repository/tianma-if/edgeever" target="_blank"><img src="https://api.hellogithub.com/v1/widgets/recommend.svg?rid=150fee4403f6433880bda91e9576ac06&claim_uid=TWNAjisURpnhL1l&theme=small" alt="Featured｜HelloGitHub" /></a>
     <a href="#贊助與支持"><img src="https://img.shields.io/badge/Sponsor-支持專案-ea4aaa?logo=github-sponsors" alt="贊助與支持" /></a>
   </p>
   <p>
-    <a href="README.zh-CN.md">简体中文</a> | <b>繁體中文</b> | <a href="README.md">English</a> | <a href="README.ja.md">日本語</a> | <a href="README.pl-PL.md">Polski</a>
+    <a href="README.zh-CN.md">简体中文</a> | <b>繁體中文</b> | <a href="README.md">English</a> | <a href="README.es.md">Español</a> | <a href="README.de.md">Deutsch</a> | <a href="README.fr.md">Français</a> | <a href="README.ja.md">日本語</a> | <a href="README.pl-PL.md">Polski</a> | <a href="README.ru.md">Русский</a>
   </p>
   <p>
     <a href="#wechat-group"><img src="assets/readme/community/wechat.svg" alt="WeChat" width="16" height="16" align="absmiddle" /> 微信交流群</a> &nbsp;|&nbsp;
     <a href="https://demo.edgeever.org">🌐 線上展示</a> &nbsp;|&nbsp;
+    <a href="https://github.com/users/tianma-if/projects/1">🗺️ 路線圖</a> &nbsp;|&nbsp;
     <a href="#全平台用戶端與瀏覽器外掛">📱 用戶端與外掛下載</a> &nbsp;|&nbsp;
-    <a href="#features">核心功能與場景矩陣</a>
+    <a href="#features">核心功能與場景矩陣</a> &nbsp;|&nbsp;
+    <a href="docs/note-migration-guide.md">📥 第三方筆記遷入</a>
   </p>
   <p align="center">
-    <img src="assets/readme/edgeever-hero-v6.png" alt="EdgeEver 產品工作區預覽" width="800" />
+    <img src="assets/readme/edgeever-hero-v8.png" alt="EdgeEver 產品工作區預覽" width="800" />
   </p>
 </div>
 
@@ -40,10 +42,10 @@ EdgeEver 是一款現代化的開源筆記與個人知識庫工作區。它延�
 很多**筆記與個人知識庫**的使用者，核心需求只是一個**可靠、開放、回應迅速**的個人知識庫。然而，當下的主流方案都各有痛點：
 
 * **印象筆記 / Evernote**：擁有最無感、最絲滑的多端雲端同步體驗。然而隨著它演進為全功能商業套件，廣告與附加功能漸多，系統開銷也隨之走高；加之免費版配額收緊、高級 AI 訂閱昂貴，且難以靈活接入現代自託管與私有 AI 工作流。
-* **Obsidian**：Markdown 開放，核心閉源；官方同步收費，第三方同步繁瑣；純本地檔案依賴遍歷掃描，當筆記累積到數千上萬條或載入複雜外掛後，冷啟動與全庫檢索明顯卡頓遲緩；圖片與附件與文字混存，儲存庫體積極易膨脹導致行動端同步緩慢，且刪除筆記後殘留附件難清理；對於「隨時隨地隨手記」的輕量場景來說偏重。
+* **Obsidian**：Markdown 開放，核心閉源；官方同步按容量與儲存庫數量持續訂閱收費，第三方同步（iCloud / WebDAV / Git 等）繁瑣且易衝突，受限於純本地檔案目錄的同步機制與行動端背景限制，難以像雲原生筆記那樣絲滑無感同步（且缺少完整 Web 端）；依賴本地遍歷掃描，筆記上千或外掛增多後冷啟動與檢索明顯卡頓；附件混存易膨脹、拖慢行動同步且刪後難清理；加之類似 IDE 的互動與外掛折騰生態上手門檻較高，對於習慣傳統雲端筆記「開箱即用、隨時隨地隨手記」的使用者來說明顯偏重。
 * **Joplin**：老牌開源三欄筆記，但介面觀感與編輯互動彷彿還停留在十幾年前，缺乏現代軟體的精緻與流暢感；官方高速同步（Joplin Cloud）需付費訂閱，免費同步若走 WebDAV 或雲端硬碟，受限於逐檔輪詢，筆記與附件增多後（尤其在行動端）同步緩慢，而自建 Joplin Server 又必須自備伺服器維護，缺少零成本 Serverless 方案；此外它沒有可在瀏覽器即開即用的完整 Web 工作區，也缺乏原生 AI Agent（MCP/ACP）與多模態知識型態。
 * **Memos / Flomo 等輕量筆記**：雖然簡單好用，但時間軸卡片版面與習慣了經典「三欄工作流程」的使用者有著天然的互動習慣差異。
-* **思源筆記等區塊級知識庫**：功能深厚且支援開源自託管，但全盤的「區塊級（Block）」架構使得日常隨手記錄與連續排版書寫的心智負擔偏重；且缺少零伺服器成本的 Serverless 部署型態，多端同步主要依賴官方付費訂閱，或需額外付費解鎖 S3/WebDAV 同步特性並自備儲存。
+* **思源筆記等區塊級知識庫**：功能深厚且支援開源自託管，但 UI 互動更貼近 Obsidian 式的重度知識庫而非傳統商業雲端筆記的直覺三欄體驗，全盤的「區塊級（Block）」架構也使得日常隨手記錄與連續排版書寫的心智負擔偏重；且缺少零伺服器成本的 Serverless 部署型態，多端同步主要依賴官方付費訂閱，或需額外付費解鎖 S3/WebDAV 同步特性並自備儲存。
 
 **EdgeEver 恰好填補了這一空白**：全端開源，提供真正**零感知、低延遲的多端瞬時雲端同步**，且全部服務均可免費自行託管；同時保留經典三欄版面與流暢排版，萬條筆記常駐依然輕盈絲滑，原生支援接入 AI Agent，部署維護零門檻、零費用。
 
@@ -75,22 +77,23 @@ EdgeEver 是一款現代化的開源筆記與個人知識庫工作區。它延�
   <a href="https://addons.mozilla.org/zh-TW/firefox/addon/edgeever-web-clipper/"><img src="https://raw.githubusercontent.com/alrra/browser-logos/58881b84c4d73adc03c06fa2c275a7abee02d935/src/firefox/firefox.svg" alt="為 Firefox 安裝 EdgeEver 網頁擷取外掛" width="36" height="36" /></a>
 </p>
 
-- 支援一鍵擷取網頁內文為純淨 Markdown，或選取文字與圖片精準儲存，直傳自託管執行個體。
-- 深度適配 20+ 主流平台結構化擷取：涵蓋社群（X、小紅書、微信公眾號、即刻、豆瓣、Threads、Bluesky）、社群與資訊（知乎、Reddit、GitHub、V2EX、Hacker News、Medium、Substack）及影音播客（Bilibili、YouTube、小宇宙）等。
+- 支援一鍵擷取網頁內文為純淨 Markdown，或選取文字與圖片、框選網頁區域精準儲存，直傳自託管執行個體。
+- 深度適配 20+ 主流平台結構化擷取：涵蓋社群（X、小紅書、Instagram、微信公眾號、即刻、豆瓣、Threads、Bluesky）、社群與資訊（知乎、Reddit、GitHub、V2EX、Hacker News、Medium、Substack）及影音播客（Bilibili、YouTube、小宇宙）等。
 
 <a id="features"></a>
 ## 核心功能與場景矩陣
 
-一站式連結「靈感擷取 · 深度創作 · 知識沉澱」的全能工作區（👉 **[查看 19 個實機案例展示與最佳實踐](docs/best-practices.zh-CN.md)**）：
+一站式連結「靈感擷取 · 深度創作 · 知識沉澱」的全能工作區（👉 **[查看 20 個實機案例展示與最佳實踐](docs/best-practices.zh-CN.md)**）：
 
-| 模組 | 基礎功能 | 進階特性 |
-| :--- | :--- | :--- |
-| **寫作與編輯** | • 經典三欄工作區，面板寬度自由調節<br>• 富文字所見即所得與 Markdown 雙視圖切換<br>• 程式碼語法突顯、數學公式、待辦清單與專注模式<br>• 秒級自動儲存、多端瞬時同步與版本歷程回溯 | • **原生海報筆記**：畫布級圖文排版與視覺卡片，按兩下即改<br>• **微信公眾號一鍵排版**：一鍵轉內嵌樣式富文字直接貼上後台<br>• **高質感長圖分享**：質感主題海報與 Monogram 頭像，支援 MD/HTML/PDF 匯出 |
-| **組織與檢索** | • 無限層級筆記本與目錄樹導覽<br>• 標籤體系（Tags）與筆記拖放排序、批次合併/移動<br>• 毫秒級即時全文搜尋與歷史記錄篩選 | • **獨立知識庫網站發布**：一鍵將整個筆記本公開發布為帶目錄樹導覽的獨立靜態網站（支援密碼保護）<br>• 多帳號與工作區多空間資料實體隔離 |
-| **擷取與附件** | • 桌面與行動端全格式附件上傳（PDF、Office、影音等）<br>• 瀏覽器選取網頁文字與圖片精準擷取<br>• 手機系統分享一鍵轉存全網圖片與微信文章 | • **全渠道結構化擷取**：深度適配小紅書、X (Twitter)、知乎、Reddit、GitHub 等 20+ 平台<br>• **微信聊天記錄一鍵歸檔**：整段對話轉筆記，保留時間軸、引用、表情與附件<br>• **端側靜默壓縮**：圖片上傳前壓縮 50%–90%；分塊串流上傳安全支援最大 1 GiB 附件 |
-| **資料與視覺化** | • 原生表格編輯與 Markdown 表格繪製<br>• 原生 Mermaid 流程圖、循序圖與架構圖繪製 | • **AI 多維表格**：自然語言一句話產生業務資料庫（含標籤、日期等欄位）<br>• **線上公開收集表單**：多維表格一鍵產生免登入外鏈表單，填報資料即時入庫<br>• **AI 智慧資訊圖與導圖**：一鍵產生時間線、對比圖、象限矩陣及心智圖 |
-| **AI 與生態** | • 側邊伴隨式 AI 助手，選取範圍/全文一鍵摘要、翻譯與修飾潤色<br>• BYOK（自備金鑰）：相容 OpenAI、Anthropic、Gemini 等主流協定 | • **原生 Agent 協定互聯**：內建 MCP（外部 Agent 讀寫筆記）與 ACP（桌面端直接喚起本機 Agent 協同創作）<br>• **AI RSS 智慧訂閱日報**：定時聚合資訊來源，AI 自動過濾雜訊並產生精煉日報<br>• 開放外掛開發文件自由擴充 |
-| **多端同步與底座** | • 電腦、手機全端秒級無感同步，無裝置數量限制<br>• 官方涵蓋 Web / macOS / Windows / Linux / iOS / Android 全平台<br>• 離線優先與同步佇列：斷網流暢寫作，連網自動復原並增量同步<br>• 標準 SQLite 儲存，無損 ZIP 封存與 Markdown 匯出匯入 | • **終身零伺服器成本**：100% 執行於 Cloudflare 免費配額（容量約 15 萬條短筆記與 5 萬張圖片）<br>• **彈性 Docker 自託管**：私有 VPS/NAS 一鍵部署，輕鬆承載百萬級筆記與瞬時同步<br>• 伺服端防暴力破解限流保護與安全資料隔離 |
+| 模組 | 核心功能與特性 |
+| :--- | :--- |
+| **寫作、整理與檢索** | • **沉浸式雙模編輯器**：可調三欄工作區，富文字與 Markdown 瞬時切換，內建筆記範本庫、數學與化學公式、語法突顯、大綱摺疊記憶及版本歷程回溯<br>• **自訂排版**：支援依筆記本或單篇自訂封面、章節導覽、內文主題配色、拍立得畫框與字級行距<br>• **多層級目錄與毫秒級檢索**：無限層級目錄樹、標籤體系、拖放排序與批次合併/移動，搭配毫秒級全文搜尋與歷史篩選<br>• **桌面端多視窗與大附件**：支援多視窗獨立編輯、外部編輯器修改附件自動回存；圖片上傳前自動壓縮 50%–90%，分塊串流上傳支援最大 1 GiB 附件 |
+| **多形態富筆記與視覺化** | • **AI 多維表格與公開表單**：一句話產生結構化業務表（支援多命名視圖、多條件篩選、多欄位排序與儲存格連結直達），一鍵發布免登入外鏈收集表單<br>• **AI 心智圖與架構圖表**：支援互動式心智圖與 Mermaid 流程圖、循序圖、架構圖即時繪製及 AI 對話產生<br>• **AI 智慧資訊圖**：對話式一鍵產生時間線、對比矩陣、四象限圖等結構化視覺圖表<br>• **原生畫布海報筆記**：內建畫布級圖文排版與視覺卡片筆記形態，按兩下即改，輕鬆製作封面與社群視覺卡片 |
+| **全渠道採集與遷移** | • **瀏覽器擷取與 20+ 平台適配**：支援網頁內文提取、選取圖文與區域框選擷取，深度適配小紅書、X、Instagram、知乎、Reddit、GitHub、Bilibili、YouTube 等<br>• **行動端分享與桌面快捷截圖**：手機系統分享一鍵轉存圖片與公眾號文章；桌面端支援全域快捷鍵框選螢幕截圖直存筆記<br>• **微信聊天記錄一鍵歸檔**：手機與桌面端合併轉發整段對話，一鍵轉為保留時間軸、引用、表情與多媒體附件的結構化筆記<br>• **第三方筆記原生一鍵遷入**：圖形介面原生匯入 Evernote（印象筆記）、Obsidian、Notion、思源筆記、flomo、Joplin 及 Markdown 目錄，完整保留層級與附件 |
+| **排版分發與知識發布** | • **獨立知識庫網站發布**：一鍵將整個筆記本公開發布為帶目錄樹導覽的獨立靜態網站（支援密碼保護）<br>• **單篇筆記外鏈分享**：支援自訂短網址、存取密碼、有效期限、閱讀統計、摺疊大綱、QR Code 下載與 Raw Markdown 直連<br>• **帶排版複製**：保留目前排版樣式與圖片，可直接貼上到微信公眾號、知乎、X 文章、部落格等編輯器<br>• **高質感長圖與多格式匯出**：內建多款質感長圖主題與 Monogram 頭像，支援匯出高畫質長圖、程式碼卡片及標準 MD / HTML / PDF |
+| **AI 與 Agent 協同** | • **伴隨式 AI 助手與 BYOK**：側邊欄選取範圍/全文摘要、潤色、翻譯與超長文自動分段續寫；相容 OpenAI、Anthropic、Gemini 等協定並支援輸出預算控制<br>• **原生 Agent 協定（MCP & ACP）**：內建 Remote MCP（支援依筆記本精細化授權讀寫）；桌面端內建 ACP 直接喚起 Codex、Claude Code、Antigravity、CodeBuddy、WorkBuddy 協同創作<br>• **AI 影音語音轉文字**：用戶端提取音軌並自動切片，直連 OpenAI 相容語音模型轉寫並一鍵插入筆記 |
+| **外掛與主題生態** | • **官方市集與跨端同步**：支援從官方市集、GitHub 儲存庫或 Manifest 網址一鍵安裝擴充功能，已安裝外掛與主題隨工作區在 Web 與桌面端間自動同步<br>• **全能力外掛 API（`@edgeever/plugin-api`）**：開放筆記/範本/附件讀寫、編輯器與內嵌區塊（Embeds）互動、自訂面板（Panels）與全域指令、內建 AI 呼叫及桌面定時任務<br>• **無程式碼主題與宿主託管設定**：支援純宣告式 JSON 主題包自訂介面；提供宿主自動繪製的外掛設定表單、獨立鍵值儲存與加密憑據（Secrets）管理 |
+| **多端同步與自託管底座** | • **全平台瞬時同步與離線優先**：涵蓋 Web / macOS / Windows / Linux / iOS / Android 且無裝置數限制；斷網流暢寫作、連網增量同步，基於 SQLite 與無損 ZIP 匯入匯出<br>• **零成本 Serverless 與 Docker 自託管**：100% 執行於 Cloudflare 免費配額（約 15 萬條短筆記與 5 萬張圖片），或使用同一套程式碼在私有 VPS / NAS 上透過 Docker 一鍵部署<br>• **儲存擴充與第三方圖床**：實例支援掛載 S3 相容物件儲存（OSS）；支援桌面端 PicGo / PicList 及網頁與桌面端 CloudFlare ImgBed 圖床直傳<br>• **桌面端自動災備與企業級安全**：本機定時備份（多快照、可選 `.edgeever.enc` 密碼加密與 WebDAV 異地同步）；單一實例多帳號空間實體隔離、防暴力破解限流、TOTP 2FA 與工作階段管理 |
 
 ## 部署
 
@@ -100,22 +103,24 @@ Cloudflare 線上部署可以選擇以下兩種方式之一：
 
 ### 方案一：交給 AI Agent 部署（建議）
 
-將下方提示詞直接複製傳送給 AI Agent（如 Codex、Claude、Cursor、WorkBuddy、Antigravity、OpenClaw、Hermes Agent 等）。執行過程中，如需存取 GitHub 或 Cloudflare，請確認權限範圍並依提示完成授權。
+將下方提示詞直接複製傳送給 AI Agent（如 Codex、Claude Code、DeepSeek Harness、WorkBuddy、Antigravity 等）。執行過程中，如需存取 GitHub 或 Cloudflare，請確認權限範圍並依提示完成授權。
 
 ```text
 請全程透過 GitHub 和 Cloudflare 線上部署 EdgeEver：
 1. Fork https://github.com/tianma-if/edgeever。
 2. 在 Cloudflare 中建立 D1 `edgeever` 與 R2 `edgeever-resources`。
-3. 在 Workers & Pages 中從 Fork 的 `main` 分支建立名為 `edgeever` 的 Worker。
-   使用儲存庫根目錄，保留 Cloudflare Workers Builds 的預設部署指令，確認其 API Token
-   具備 D1 讀取及編輯權限，然後儲存並部署。
-4. Worker 建立後，設定執行時 Secret `EDGE_EVER_AUTH_PASSWORD`，值為使用者指定的密碼
-   （建議至少 32 個字元）。管理員使用者名稱預設為 `admin`；如需自訂，請在再次建置前
-   設定 Workers Builds 建置變數 `EDGE_EVER_AUTH_USERNAME`。
-5. 再次建置，驗證 `/api/health` 和 `/api/openapi.json`，再用該管理員
-   使用者名稱和密碼驗證登入。
-6. 啟用並手動執行一次名為 `Update deployed EdgeEver` 的 GitHub Actions 工作流程，
-   以便後續自動同步正式版本，持續獲得 EdgeEver 的功能更新與問題修復。
+3. 在 Workers & Pages 中選擇「Start with Hello World!」，建立名為 `edgeever` 的 Worker。
+4. 在該 Worker 的 Settings → Variables and Secrets 中新增執行時 Secret
+   `EDGE_EVER_AUTH_PASSWORD`，值為使用者指定的登入密碼（建議至少 32 個字元），並點選 Deploy。
+   管理員使用者名稱預設為 `admin`。
+5. 確認 Secret 已部署後，在該 Worker 的 Settings → Builds → Connect 中連接 Fork 的
+   `main` 分支。
+6. 在該 Worker 的 Settings → Builds → API token 中選擇或建立用於部署的
+   Cloudflare API Token，並確認它具備目標帳戶的 D1 讀取及編輯權限。
+7. 在 Fork 的 GitHub 儲存庫中進入 Actions → Update deployed EdgeEver，依提示啟用工作流程，
+   選擇 `main` 分支並點選 Run workflow。在 Cloudflare 確認對應建置成功、部署完成後，驗證 `/api/health` 和 `/api/openapi.json`，
+   再用管理員使用者名稱和密碼驗證登入。
+   後續由該工作流程自動同步正式版本，持續獲得功能更新與問題修復。
 ```
 
 > 詳細約定與要求請查看：[AI Agent 線上部署約定](docs/agent-deploy-cloudflare.zh-CN.md)。
@@ -123,16 +128,17 @@ Cloudflare 線上部署可以選擇以下兩種方式之一：
 ### 方案二：手動線上部署
 
 <details>
-<summary>📖 展開查看：網頁端 6 步手動部署流程</summary>
+<summary>📖 展開查看：網頁端 7 步手動部署流程</summary>
 
-只需在網頁端完成 6 步設定：
+請嚴格依照以下順序，在網頁端完成 7 步設定：
 
 1. **Fork 儲存庫**：在 GitHub 點選右上角 **Fork**，將專案 Fork 到您的個人帳戶下。
 2. **建立 Cloudflare 資源**：建立 D1 `edgeever` 與 R2 `edgeever-resources`。
-3. **匯入並設定專案**：在 Cloudflare **Workers & Pages** 中從 Fork 的 `main` 分支建立名為 `edgeever` 的 Worker。使用儲存庫根目錄，保留由 Cloudflare 線上執行的 Workers Builds 預設部署指令，並確認其 API Token 具備 D1 讀取及編輯權限。binding 由部署指令產生，不要修改 Fork 中的檔案。
-4. **準備管理員密碼**：準備管理員登入密碼，建議至少 32 個字元。Worker 建立後，將它儲存為執行時 Secret `EDGE_EVER_AUTH_PASSWORD`。
-5. **首次建置與驗證**：儲存並部署會建立 Worker 並啟動建置。首次建置主要用於初始化實例，若因尚未配置管理員 Secret 而報錯屬於預期行為，只需在第 4 步新增執行時 Secret `EDGE_EVER_AUTH_PASSWORD` 後點擊重試建置即可通過。管理員使用者名稱預設為 `admin`；如需使用其他名稱，請在重試建置前設定 Workers Builds 建置變數 `EDGE_EVER_AUTH_USERNAME`。部署完成後造訪 `/api/health`，確認回傳 `200`，再用設定的管理員使用者名稱和密碼登入。
-6. **啟用自動更新**：進入 Fork 的 **Actions** 分頁，點選 **I understand my workflows, go ahead and enable them**，然後手動執行一次 **Update deployed EdgeEver**，確保後續能夠自動獲得正式版本的功能更新與修復。
+3. **建立 Worker**：在 Cloudflare Workers & Pages 中選擇 Create application → Start with Hello World!，命名為 `edgeever` 並部署。此時是預留服務，第 7 步才部署 EdgeEver。
+4. **設定管理員密碼**：在該 Worker 的 Settings → Variables and Secrets 中，選擇 Secret 類型，新增 `EDGE_EVER_AUTH_PASSWORD` 並點選 Deploy。值為您指定的登入密碼，建議至少 32 個字元。完成後再連接 Fork。
+5. **連接 Fork**：在既有 Worker 的 Settings → Builds → Connect 中選擇 Fork 和正式環境分支 `main`。
+6. **設定部署權限**：在該 Worker 的 Settings → Builds → API token 中選擇或建立用於部署的 Cloudflare API Token，並確認它具備目標帳戶的 D1 讀取及編輯權限。
+7. **建置並驗證**：在 Fork 的 GitHub 儲存庫中進入 Actions → Update deployed EdgeEver，依提示啟用工作流程， 選擇 `main` 分支並點選 Run workflow。在 Cloudflare 確認對應建置成功、部署完成後，確認 `/api/health` 回傳 `200`，並驗證登入。後續由該工作流程自動同步正式版本，持續獲得功能更新與問題修復。
 
 > 📖 包含具體參數與建置指令的詳細步驟，請查看 [線上部署完整文件](docs/deploy-cloudflare-button.zh-CN.md)。
 
@@ -172,15 +178,14 @@ curl -fsSL https://edgeever.org/install.sh | bash
 無論是日常資料備份、跨實例無縫遷移，還是從既有筆記平台遷入，EdgeEver 均提供完整可靠的資料流轉方案：
 
 - **EdgeEver 原生備份與還原**：在應用程式內進入 **個人中心** -> **匯入與匯出**，可隨時匯出或匯入 EdgeEver ZIP 封存檔。解壓縮後的 `notes/` 目錄保留清晰的純文字 Markdown 檔案與附件，可直接用於本機封存或獨立閱讀；內部結構化中繼資料則支援在不同 EdgeEver 實例間無損完整還原。匯入時保留目標實例的既有資料，同 ID 內容自動覆蓋更新。
-- **第三方筆記平滑遷入**：
-  - **Evernote（印象筆記）遷入**：請參考 [docs/evernote-migration-guide.md](docs/evernote-migration-guide.md)
-  - **flomo 筆記遷入**：請参考 [docs/flomo-migration-guide.md](docs/flomo-migration-guide.md)
-  - **Memos 筆記遷入**：請參考 [docs/memos-migration-guide.md](docs/memos-migration-guide.md)
-  - **Notion 筆記遷入**：請參考 [docs/notion-migration-guide.md](docs/notion-migration-guide.md)
+- **桌面端定時自動備份與異地副本**：在桌面用戶端的 **備份與匯入** 設定中支援開啟本機定時自動備份，可自訂備份目錄、週期（每週 / 每月）與快照保留份數，內容有變更時自動產生標準 ZIP 或 `.edgeever.enc` 加密封存；同時支援設定 WebDAV 異地副本，每次本機備份完成後自動上傳至 NAS 或相容儲存空間。
+- **第三方筆記平滑遷入**：無論是透過 Web/桌面端圖形介面原生一鍵匯入（支援 Evernote/印象筆記、Obsidian、Notion、思源筆記/SiYuan、flomo、Joplin 及通用 Markdown 檔案與目錄的完整筆記、層級與附件），還是借助 AI Agent (MCP) 協同遷入 Memos 等知識庫，EdgeEver 均提供無縫、可驗證的遷移能力。詳見 [第三方筆記平滑遷入 EdgeEver 完整指南](docs/note-migration-guide.md)。
 
 ### AI 與 MCP 協定互聯
 
-在 **個人中心** -> **API / MCP** 中建立 API Token 並一鍵複製 Remote MCP 設定，即可讓 Claude Code、Cursor、Antigravity、OpenClaw 等 AI Agent 在帳號授權範圍內安全管理你的知識庫。系統支援文字筆記、圖表筆記（心智圖、流程圖與架構圖）、多維表格筆記與原生海報筆記的完整增刪改查，Agent 還可管理筆記本目錄、標籤、附件、歷史版本、筆記範本與 AI 指令。
+在 **個人中心** -> **API / MCP** 中建立 API Token（支援全域或依筆記本精細化設定唯讀/讀寫權限）並一鍵複製 Remote MCP 設定，即可讓 Claude Code、Codex、DeepSeek Harness、Antigravity 等 AI Agent 在授權範圍內安全管理你的知識庫。系統支援文字筆記、圖表筆記（心智圖、流程圖與架構圖）、多維表格筆記與原生海報筆記的完整增刪改查，Agent 還可管理筆記本目錄、標籤、附件、歷史版本、筆記範本與 AI 指令。
+
+用戶端設定、Token 權限、問題排查與 Agent 工作規則範例，請參閱 [在 MCP 用戶端與 AI Agent 中使用 EdgeEver](docs/mcp-guide.zh-CN.md)（簡體中文）。
 
 > 💡 **情境啟發：**
 > 讓 AI 真正成為你的知識管家與創作外腦——不僅能將方案秒級產生為可互動的心智圖、流程圖、架構圖與多維表格，還能為 AI Agent 提供私有脈絡。憑藉 EdgeEver 強大的富文字編輯與精美排版能力，AI 協同沉澱的不再是冰冷文字，而是結構工整、排版優雅、隨時可一鍵分發的高品質知識資產。
@@ -195,7 +200,7 @@ curl -fsSL https://edgeever.org/install.sh | bash
 
 - **OSS 物件儲存**：實例 Owner 可在**設定 → 進階設定 → OSS 物件儲存**中設定相容 S3 API 的物件儲存。切換儲存不會遷移或影響既有附件。
 - **桌面端 PicGo 圖床**：桌面端可以把新插入的圖片交給本機或你信任的遠端 PicGo、PicList 服務（例如 NAS），再由它上傳到 GitHub、SM.MS、又拍雲、七牛雲或自建圖床。位址只需以 `/upload` 結尾，經過反向代理的 PicList 也能使用。
-- **桌面端 CloudFlare ImgBed 圖床**：桌面端也可以用 API Token 把新插入的圖片直接上傳到你自建的 [CloudFlare ImgBed](https://github.com/MarSeventh/CloudFlare-ImgBed)。上傳目錄支援 `{Y}/{m}/{d}`、`{memoId}` 等 PicList 風格的佔位符。
+- **桌面端與網頁端 CloudFlare ImgBed**：使用 API Token 將新插入的圖片直接上傳到自建 [CloudFlare ImgBed](https://github.com/MarSeventh/CloudFlare-ImgBed)，目錄支援 `{Y}/{m}/{d}`、`{memoId}` 等佔位符。網頁端需要 HTTPS，並在圖床跨來源設定中允許目前 EdgeEver 來源和 `Authorization` 請求標頭。憑據僅儲存在目前瀏覽器或桌面端，圖片不納入 EdgeEver 備份。
 
 ### 外掛與個人化主題
 
@@ -220,7 +225,7 @@ bun run dev
 
 - Bun workspace monorepo，包含 Web、API、官網與共享型別套件。
 - 前端：Vite、React、React Router、TanStack Query，UI 基於 Tailwind CSS、shadcn/ui、Radix UI。
-- 编辑器：TipTap / ProseMirror，支援 Markdown；PWA 使用 vite-plugin-pwa、Workbox、Dexie。
+- 编辑器：TipTap / ProseMirror，支援 Markdown。
 - Android App：`apps/mobile` 中的 Expo + React Native，採用 SQLite 本機儲存與增量同步。
 - iOS App：`apps/ios` 中的原生 SwiftUI（iOS 17+），內建 TipTap EditorBundle、GRDB 本機鏡像／outbox，介面與 Android 殼層對齊。
 - 原生桌面版：Electron + Rust sidecar，兼顧跨平台一致體驗與高效能本機資料服務；基於 SQLite 支援離線編輯、連網後增量同步與本機備份。
@@ -234,7 +239,7 @@ bun run dev
 <summary>📁 展開查看：Monorepo 專案目錄結構</summary>
 
 ```text
-apps/web          Vite + React 前端、PWA、離線草稿與同步佇列
+apps/web          Vite + React 前端、離線草稿與同步佇列
 apps/extension    Chrome/Edge/Firefox Manifest V3 網頁擷取擴充功能
 apps/api          Cloudflare Worker + Hono API、MCP endpoint
 apps/mobile       Expo + React Native Android App
@@ -267,7 +272,7 @@ content_text      全文搜尋、摘要與快速索引使用
 ### 核心機制與設計決策
 
 - **端側靜默壓縮**：為避免在 Serverless（如 Cloudflare Worker）上執行圖片轉碼消耗寶貴的運算額度，圖片壓縮全部放在 Web 用戶端上傳前完成（PNG/JPEG/WebP/AVIF 轉 WebP，最大邊限制 2560px；不減小體積則保留原圖）。伺服端 REST API 與 MCP 介面直接入庫用戶端傳輸的原始內容。
-- **離線優先與同步時序**：Web、PWA 與桌面版會在使用者停止編輯 30 秒後自動上傳增量，並在前景頁面可見時每 5 分鐘拉取一次雲端變更；視窗重新聚焦或手動重新整理時立即同步。開發者可在 [`apps/web/src/lib/workspace-refresh.ts`](apps/web/src/lib/workspace-refresh.ts) 中調整相關時序常數（`DEFERRED_MEMO_SYNC_DELAY_MS` 與 `BACKGROUND_WORKSPACE_REFRESH_INTERVAL_MS`）。
+- **離線優先與同步時序**：Web 與桌面版會在使用者停止編輯 30 秒後自動上傳增量，並在前景頁面可見時每 5 分鐘拉取一次雲端變更；視窗重新聚焦或手動重新整理時立即同步。開發者可在 [`apps/web/src/lib/workspace-refresh.ts`](apps/web/src/lib/workspace-refresh.ts) 中調整相關時序常數（`DEFERRED_MEMO_SYNC_DELAY_MS` 與 `BACKGROUND_WORKSPACE_REFRESH_INTERVAL_MS`）。
 
 ### 參與程式碼貢獻
 
@@ -311,6 +316,7 @@ EdgeEver 是免費開源專案。保持跨平台用戶端（macOS、Windows、Li
 - 心智圖與視覺化圖表筆記的產品設計參考了 [XMind](https://xmind.com/) 和 [ProcessOn](https://www.processon.com/) 等圖表工具的公開產品體驗。相關功能由 EdgeEver 獨立設計與實作。
 - EdgeEver 的海報設計工作台借鑑了向阳乔木（joeseesun）的 [Qiaomu Design](https://github.com/joeseesun/qiaomu-cover-design)，並基於其 MIT 開源授權改編了範本與字型排版引擎。
 - EdgeEver 圖片分享卡片的主題視覺與排版參考了 [流光卡片](https://fireflycard.shushiai.com/)，感謝其設計帶來的啟發。
+- EdgeEver 的微信公眾號一鍵排版與精選文章視覺樣式參考了 [gzh-design-skill](https://github.com/isjiamu/gzh-design-skill)，感謝其在公眾號排版與視覺設計上的啟發。
 
 ## 商標與品牌使用
 
@@ -329,21 +335,25 @@ EdgeEver 是自行託管軟體。除官方展示實例外，專案維護者不�
   <a href="https://github.com/tianma-if"><img src="https://images.weserv.nl/?url=https://avatars.githubusercontent.com/u/5895871?v=4&h=96&w=96&fit=cover&mask=circle&maxage=7d" width="48" height="48" alt="@tianma-if" /></a>
   <a href="https://github.com/dkoryto"><img src="https://images.weserv.nl/?url=https://avatars.githubusercontent.com/u/2572180?v=4&h=96&w=96&fit=cover&mask=circle&maxage=7d" width="48" height="48" alt="@dkoryto" /></a>
   <a href="https://github.com/sivdead"><img src="https://images.weserv.nl/?url=https://avatars.githubusercontent.com/u/27731043?v=4&h=96&w=96&fit=cover&mask=circle&maxage=7d" width="48" height="48" alt="@sivdead" /></a>
-  <a href="https://github.com/thorufur"><img src="https://images.weserv.nl/?url=https://avatars.githubusercontent.com/u/55167?v=4&h=96&w=96&fit=cover&mask=circle&maxage=7d" width="48" height="48" alt="@thorufur" /></a>
   <a href="https://github.com/yulei666"><img src="https://images.weserv.nl/?url=https://avatars.githubusercontent.com/u/7358439?v=4&h=96&w=96&fit=cover&mask=circle&maxage=7d" width="48" height="48" alt="@yulei666" /></a>
+  <a href="https://github.com/thorufur"><img src="https://images.weserv.nl/?url=https://avatars.githubusercontent.com/u/55167?v=4&h=96&w=96&fit=cover&mask=circle&maxage=7d" width="48" height="48" alt="@thorufur" /></a>
   <a href="https://github.com/arsaboo"><img src="https://images.weserv.nl/?url=https://avatars.githubusercontent.com/u/18319734?v=4&h=96&w=96&fit=cover&mask=circle&maxage=7d" width="48" height="48" alt="@arsaboo" /></a>
   <a href="https://github.com/alyyasser"><img src="https://images.weserv.nl/?url=https://avatars.githubusercontent.com/u/16476111?v=4&h=96&w=96&fit=cover&mask=circle&maxage=7d" width="48" height="48" alt="@alyyasser" /></a>
   <a href="https://github.com/MadlyFX"><img src="https://images.weserv.nl/?url=https://avatars.githubusercontent.com/u/4896705?v=4&h=96&w=96&fit=cover&mask=circle&maxage=7d" width="48" height="48" alt="@MadlyFX" /></a>
   <a href="https://github.com/claude"><img src="https://images.weserv.nl/?url=https://avatars.githubusercontent.com/u/81847?v=4&h=96&w=96&fit=cover&mask=circle&maxage=7d" width="48" height="48" alt="@claude" /></a>
-  <a href="https://github.com/Crowszzz"><img src="https://images.weserv.nl/?url=https://avatars.githubusercontent.com/u/75199133?v=4&h=96&w=96&fit=cover&mask=circle&maxage=7d" width="48" height="48" alt="@Crowszzz" /></a>
-  <a href="https://github.com/Shunamxiao"><img src="https://images.weserv.nl/?url=https://avatars.githubusercontent.com/u/92215296?v=4&h=96&w=96&fit=cover&mask=circle&maxage=7d" width="48" height="48" alt="@Shunamxiao" /></a>
-  <a href="https://github.com/nzhdotme"><img src="https://images.weserv.nl/?url=https://avatars.githubusercontent.com/u/9588882?v=4&h=96&w=96&fit=cover&mask=circle&maxage=7d" width="48" height="48" alt="@nzhdotme" /></a>
-  <a href="https://github.com/mookim-eth"><img src="https://images.weserv.nl/?url=https://avatars.githubusercontent.com/u/97934198?v=4&h=96&w=96&fit=cover&mask=circle&maxage=7d" width="48" height="48" alt="@mookim-eth" /></a>
-  <a href="https://github.com/imgdown"><img src="https://images.weserv.nl/?url=https://avatars.githubusercontent.com/u/348032096?v=4&h=96&w=96&fit=cover&mask=circle&maxage=7d" width="48" height="48" alt="@imgdown" /></a>
-  <a href="https://github.com/X77seven"><img src="https://images.weserv.nl/?url=https://avatars.githubusercontent.com/u/171017641?v=4&h=96&w=96&fit=cover&mask=circle&maxage=7d" width="48" height="48" alt="@X77seven" /></a>
-  <a href="https://github.com/Sergmay911"><img src="https://images.weserv.nl/?url=https://avatars.githubusercontent.com/u/304439776?v=4&h=96&w=96&fit=cover&mask=circle&maxage=7d" width="48" height="48" alt="@Sergmay911" /></a>
-  <a href="https://github.com/0xfelixli"><img src="https://images.weserv.nl/?url=https://avatars.githubusercontent.com/u/81979996?v=4&h=96&w=96&fit=cover&mask=circle&maxage=7d" width="48" height="48" alt="@0xfelixli" /></a>
-  <a href="https://github.com/Z-DDV"><img src="https://images.weserv.nl/?url=https://avatars.githubusercontent.com/u/122068983?v=4&h=96&w=96&fit=cover&mask=circle&maxage=7d" width="48" height="48" alt="@Z-DDV" /></a>
   <a href="https://github.com/CottonChou"><img src="https://images.weserv.nl/?url=https://avatars.githubusercontent.com/u/17818375?v=4&h=96&w=96&fit=cover&mask=circle&maxage=7d" width="48" height="48" alt="@CottonChou" /></a>
+  <a href="https://github.com/Z-DDV"><img src="https://images.weserv.nl/?url=https://avatars.githubusercontent.com/u/122068983?v=4&h=96&w=96&fit=cover&mask=circle&maxage=7d" width="48" height="48" alt="@Z-DDV" /></a>
+  <a href="https://github.com/DavidPivert"><img src="https://images.weserv.nl/?url=https://avatars.githubusercontent.com/u/61420909?v=4&h=96&w=96&fit=cover&mask=circle&maxage=7d" width="48" height="48" alt="@DavidPivert" /></a>
+  <a href="https://github.com/0xfelixli"><img src="https://images.weserv.nl/?url=https://avatars.githubusercontent.com/u/81979996?v=4&h=96&w=96&fit=cover&mask=circle&maxage=7d" width="48" height="48" alt="@0xfelixli" /></a>
+  <a href="https://github.com/jayhemnani9910"><img src="https://images.weserv.nl/?url=https://avatars.githubusercontent.com/u/193022578?v=4&h=96&w=96&fit=cover&mask=circle&maxage=7d" width="48" height="48" alt="@jayhemnani9910" /></a>
+  <a href="https://github.com/Sergmay911"><img src="https://images.weserv.nl/?url=https://avatars.githubusercontent.com/u/304439776?v=4&h=96&w=96&fit=cover&mask=circle&maxage=7d" width="48" height="48" alt="@Sergmay911" /></a>
+  <a href="https://github.com/X77seven"><img src="https://images.weserv.nl/?url=https://avatars.githubusercontent.com/u/171017641?v=4&h=96&w=96&fit=cover&mask=circle&maxage=7d" width="48" height="48" alt="@X77seven" /></a>
+  <a href="https://github.com/imgdown"><img src="https://images.weserv.nl/?url=https://avatars.githubusercontent.com/u/348032096?v=4&h=96&w=96&fit=cover&mask=circle&maxage=7d" width="48" height="48" alt="@imgdown" /></a>
+  <a href="https://github.com/xinyang920"><img src="https://images.weserv.nl/?url=https://avatars.githubusercontent.com/u/43229479?v=4&h=96&w=96&fit=cover&mask=circle&maxage=7d" width="48" height="48" alt="@xinyang920" /></a>
+  <a href="https://github.com/mookim-eth"><img src="https://images.weserv.nl/?url=https://avatars.githubusercontent.com/u/97934198?v=4&h=96&w=96&fit=cover&mask=circle&maxage=7d" width="48" height="48" alt="@mookim-eth" /></a>
+  <a href="https://github.com/nzhdotme"><img src="https://images.weserv.nl/?url=https://avatars.githubusercontent.com/u/9588882?v=4&h=96&w=96&fit=cover&mask=circle&maxage=7d" width="48" height="48" alt="@nzhdotme" /></a>
+  <a href="https://github.com/tankle0"><img src="https://images.weserv.nl/?url=https://avatars.githubusercontent.com/u/63094764?v=4&h=96&w=96&fit=cover&mask=circle&maxage=7d" width="48" height="48" alt="@tankle0" /></a>
+  <a href="https://github.com/Shunamxiao"><img src="https://images.weserv.nl/?url=https://avatars.githubusercontent.com/u/92215296?v=4&h=96&w=96&fit=cover&mask=circle&maxage=7d" width="48" height="48" alt="@Shunamxiao" /></a>
+  <a href="https://github.com/Crowszzz"><img src="https://images.weserv.nl/?url=https://avatars.githubusercontent.com/u/75199133?v=4&h=96&w=96&fit=cover&mask=circle&maxage=7d" width="48" height="48" alt="@Crowszzz" /></a>
 </p>
 <!-- readme-contributors:end -->

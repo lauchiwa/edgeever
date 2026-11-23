@@ -1,10 +1,15 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { AiModelConfig, AiProvider, AiProviderConfig, AuthSession } from "@edgeever/shared";
-import { CheckCircle2, Loader2, MoreHorizontal, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
+import type { AiDiscoveredModel, AiModelConfig, AiProvider, AiProviderConfig, AuthSession } from "@edgeever/shared";
+import { CheckCircle2, Loader2, MoreHorizontal, Pencil, Plus, RefreshCw, SlidersHorizontal, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { aiErrorMessage, isLegacyProviderDisplayName, providerDefaults, trimAiText } from "@/components/settings/ai-provider-options";
-import { AiModelIdInput } from "@/components/settings/AiModelIdInput";
+import { ComboboxInput } from "@/components/ComboboxInput";
+import {
+  AiModelOutputBudgetDialog,
+  hasCustomAiModelOutputBudgets,
+  supportsAiModelOutputBudgets,
+} from "@/components/settings/AiModelOutputBudgetDialog";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -36,6 +41,9 @@ import {
 
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
+// A stable empty list, so memos keyed on the discovered models do not rerun every render.
+const EMPTY_DISCOVERED_MODELS: AiDiscoveredModel[] = [];
+
 export const AiProviderCard = ({ provider: saved, defaultDisplayName, defaultModelId, readOnly, onChanged }: {
   provider: AiProviderConfig;
   defaultDisplayName: string;
@@ -60,6 +68,8 @@ export const AiProviderCard = ({ provider: saved, defaultDisplayName, defaultMod
   const [showAddModel, setShowAddModel] = useState(false);
   const [manualDiscovery, setManualDiscovery] = useState(false);
   const [manualDiscoveryFailed, setManualDiscoveryFailed] = useState(false);
+  const [budgetModelId, setBudgetModelId] = useState<string | null>(null);
+  const budgetModel = budgetModelId ? saved.models.find((model) => model.id === budgetModelId) ?? null : null;
 
   useEffect(() => {
     setProvider(saved.provider);
@@ -92,7 +102,8 @@ export const AiProviderCard = ({ provider: saved, defaultDisplayName, defaultMod
     refetchOnReconnect: true,
     refetchInterval: (query) => nextModelDiscoveryRefresh(query.state.dataUpdatedAt, query.state.errorUpdatedAt),
   });
-  const discoveredModels = discoveryQuery.data?.models ?? [];
+  const discoveredModels = discoveryQuery.data?.models ?? EMPTY_DISCOVERED_MODELS;
+  const discoveredModelOptions = useMemo(() => discoveredModels.map((model) => ({ value: model.modelId, label: model.displayName })), [discoveredModels]);
   const discoveryLoading = discoveryQuery.isFetching && (!discoveryQuery.data || manualDiscovery);
   const discoveryError = (discoveryQuery.error && !discoveryQuery.data) || manualDiscoveryFailed;
   useEffect(() => {
@@ -292,6 +303,27 @@ export const AiProviderCard = ({ provider: saved, defaultDisplayName, defaultMod
                       {t("aiModel.defaultBadge")}
                     </span>
                   ) : null}
+                  {supportsAiModelOutputBudgets(model) ? (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className={hasCustomAiModelOutputBudgets(model)
+                            ? "h-4 w-4 shrink-0 text-slate-700 hover:bg-card hover:text-slate-900"
+                            : "h-4 w-4 shrink-0 text-slate-400 hover:bg-card hover:text-slate-900"}
+                          onClick={() => setBudgetModelId(model.id)}
+                          aria-label={`${t(hasCustomAiModelOutputBudgets(model) ? "aiModel.outputBudgetCustomized" : "aiModel.outputBudget")}: ${model.displayName}`}
+                        >
+                          <SlidersHorizontal className="h-3 w-3" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom">
+                        {t(hasCustomAiModelOutputBudgets(model) ? "aiModel.outputBudgetCustomized" : "aiModel.outputBudget")}
+                      </TooltipContent>
+                    </Tooltip>
+                  ) : null}
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <Button
@@ -407,6 +439,18 @@ export const AiProviderCard = ({ provider: saved, defaultDisplayName, defaultMod
         </DialogContent>
       </Dialog>
 
+      {budgetModel ? (
+        <AiModelOutputBudgetDialog
+          key={budgetModel.id}
+          providerConfigId={saved.id}
+          model={budgetModel}
+          readOnly={readOnly}
+          open
+          onOpenChange={(open) => { if (!open) setBudgetModelId(null); }}
+          onChanged={onChanged}
+        />
+      ) : null}
+
       <Dialog open={showAddModel} onOpenChange={handleAddModelChange}>
         <DialogContent
           ref={addModelDialogRef}
@@ -432,10 +476,10 @@ export const AiProviderCard = ({ provider: saved, defaultDisplayName, defaultMod
             <Field as="div" label={t("aiModel.modelId")} hint={discoveryLoading
               ? t("aiModel.discoveryLoading")
               : discoveryQuery.data ? t("aiModel.discoveryComplete", { count: discoveredModels.length }) : undefined}>
-              <AiModelIdInput
+              <ComboboxInput
                 value={modelId}
                 onValueChange={setModelId}
-                models={discoveredModels}
+                options={discoveredModelOptions}
                 placeholder={t("aiModel.modelIdPlaceholder")}
               />
             </Field>

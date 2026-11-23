@@ -35,7 +35,7 @@ export const ANDROID_INSTALL_UPDATE_SOURCES: readonly MobileInstallUpdateSource[
   },
 ];
 
-type LatestReleaseResponse = {
+type GitHubRelease = {
   assets?: unknown;
   tag_name?: unknown;
 };
@@ -95,7 +95,18 @@ const findAndroidReleaseAsset = (assets: unknown): MobileRelease | null => {
   return releases.length === 1 ? releases[0] : null;
 };
 
-export const findAndroidReleaseVersion = (assets: unknown) => findAndroidReleaseAsset(assets)?.version ?? null;
+const fetchGitHubRelease = async (fetchRelease: typeof fetch) => {
+  const response = await fetchRelease(LATEST_RELEASE_API_URL, {
+    headers: {
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+    },
+  });
+  if (!response.ok) {
+    throw new Error(`GitHub release check failed with status ${response.status}`);
+  }
+  return await response.json() as GitHubRelease;
+};
 
 export const findNewerMobileRelease = async (
   currentVersion: string,
@@ -106,17 +117,7 @@ export const findNewerMobileRelease = async (
     throw new Error(`Invalid installed app version: ${currentVersion}`);
   }
 
-  const response = await fetchRelease(LATEST_RELEASE_API_URL, {
-    headers: {
-      Accept: "application/vnd.github+json",
-      "X-GitHub-Api-Version": "2022-11-28",
-    },
-  });
-  if (!response.ok) {
-    throw new Error(`GitHub release check failed with status ${response.status}`);
-  }
-
-  const release = await response.json() as LatestReleaseResponse;
+  const release = await fetchGitHubRelease(fetchRelease);
   if (typeof release.tag_name !== "string") {
     throw new Error("GitHub release response does not contain a version tag");
   }

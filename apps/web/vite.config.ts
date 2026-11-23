@@ -226,7 +226,7 @@ export default defineConfig({
             },
           },
           {
-            urlPattern: ({ url }) => /\/assets\/i18n-(?:ja|pl|ru)-/.test(url.pathname),
+            urlPattern: ({ url }) => /\/assets\/i18n-(?:en-US|ja|pl|ru|zh-TW|es|de|fr)-/.test(url.pathname),
             handler: "CacheFirst",
             options: {
               cacheName: "edgeever-optional-locales",
@@ -268,9 +268,12 @@ export default defineConfig({
   ],
   resolve: {
     alias: {
+      // Its browser export requires document; the default table also works in Workers.
+      "decode-named-character-reference": fileURLToPath(import.meta.resolve("decode-named-character-reference")),
       "@": fileURLToPath(new URL("./src", import.meta.url)),
     },
   },
+  worker: { format: "es" },
   server: {
     proxy: {
       "/api": {
@@ -295,7 +298,7 @@ export default defineConfig({
       ? false
       : {
           resolveDependencies: (_filename, dependencies) => dependencies.filter((dependency) =>
-            !/(?:vendor-code-highlight|vendor-(?:mermaid|D3|tiptap|prosemirror|floating|codemirror|x6|infographic|zod|streamdown)|vendor~(?:wasm|emacs-lisp)-|vendor-radix(?!-slot)|ui-primitives|ui-button-tooltip|i18n-(?:ja|pl|ru)-)/.test(dependency),
+            !/(?:vendor-code-highlight|vendor-(?:mermaid|D3|tiptap|prosemirror|floating|codemirror|x6|infographic|zod|streamdown)|vendor~(?:wasm|emacs-lisp)-|vendor-radix(?!-slot)|ui-primitives|ui-button-tooltip|i18n-(?:en-US|ja|pl|ru|zh-TW|es|de|fr)-)/.test(dependency),
           ),
         },
     rolldownOptions: {
@@ -341,6 +344,16 @@ export default defineConfig({
               // inherit the highlighter as a startup dependency.
             },
             {
+              name: "i18n-en-US",
+              test: /[\\/]i18n[\\/](?:resources[\\/])?en-US\.ts$/,
+              priority: 41,
+            },
+            {
+              name: "i18n-zh-TW",
+              test: /[\\/]i18n[\\/](?:resources[\\/])?zh-TW\.ts$/,
+              priority: 41,
+            },
+            {
               name: "i18n-ja",
               test: /[\\/]i18n[\\/](?:resources[\\/])?ja\.ts$/,
               priority: 41,
@@ -353,6 +366,21 @@ export default defineConfig({
             {
               name: "i18n-ru",
               test: /[\\/]i18n[\\/](?:resources[\\/])?ru\.ts$/,
+              priority: 41,
+            },
+            {
+              name: "i18n-es",
+              test: /[\\/]i18n[\\/](?:resources[\\/])?es\.ts$/,
+              priority: 41,
+            },
+            {
+              name: "i18n-de",
+              test: /[\\/]i18n[\\/](?:resources[\\/])?de\.ts$/,
+              priority: 41,
+            },
+            {
+              name: "i18n-fr",
+              test: /[\\/]i18n[\\/](?:resources[\\/])?fr\.ts$/,
               priority: 41,
             },
             {
@@ -434,6 +462,7 @@ export default defineConfig({
               name: "vendor-floating",
               test: /node_modules[\\/](@floating-ui|tippy\.js)[\\/]/,
               priority: 28,
+              entriesAware: true,
             },
             {
               name: "vendor-query",
@@ -460,6 +489,8 @@ export default defineConfig({
               test: /node_modules[\\/]lucide-react[\\/]/,
               priority: 18,
               entriesAware: true,
+              // Avoid a request per tiny shared icon while keeping optional icons deferred.
+              entriesAwareMergeThreshold: 8 * 1024,
             },
             {
               name: "vendor-radix-slot",
@@ -472,6 +503,7 @@ export default defineConfig({
               name: "vendor-radix",
               test: /node_modules[\\/](@radix-ui|cmdk|vaul)[\\/]/,
               priority: 15,
+              entriesAware: true,
             },
             {
               name: "vendor-ui-utils",
@@ -512,9 +544,11 @@ export default defineConfig({
               priority: 12,
             },
             {
+              // Shell tooltips must not pull every lazy screen's UI into startup.
               name: "ui-primitives",
               test: /src[\\/]components[\\/]ui[\\/]/,
               priority: 10,
+              entriesAware: true,
             },
             {
               name: "vendor",

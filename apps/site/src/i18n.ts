@@ -1,7 +1,22 @@
+import { deSiteCopy, deSiteTagline } from "./i18n-de";
+import { esSiteCopy, esSiteTagline } from "./i18n-es";
+import { frSiteCopy, frSiteTagline } from "./i18n-fr";
 import { jaSiteCopy, jaSiteTagline } from "./i18n-ja";
 import { plSiteCopy, plSiteTagline } from "./i18n-pl";
+import { ruSiteCopy, ruSiteTagline } from "./i18n-ru";
+import { zhTwSiteCopy, zhTwSiteTagline } from "./i18n-zh-tw";
 
-export const siteLocales = ["zh-CN", "en-US", "ja", "pl"] as const;
+export const siteLocales = [
+  "zh-CN",
+  "zh-TW",
+  "en-US",
+  "es",
+  "de",
+  "fr",
+  "ja",
+  "pl",
+  "ru",
+] as const;
 export type SiteLocale = (typeof siteLocales)[number];
 
 export const defaultSiteLocale: SiteLocale = "zh-CN";
@@ -11,26 +26,41 @@ export const siteLocaleDataAttribute = "data-edgeever-site-locale";
 
 export const siteLocalePrefixes: Record<SiteLocale, string> = {
   "zh-CN": "",
+  "zh-TW": "/zh-tw",
   "en-US": "/en",
+  es: "/es",
+  de: "/de",
+  fr: "/fr",
   ja: "/ja",
   pl: "/pl",
+  ru: "/ru",
 };
 
 export const siteLocaleLabels: Record<SiteLocale, string> = {
   "zh-CN": "简体中文",
+  "zh-TW": "繁體中文",
   "en-US": "English",
+  es: "Español",
+  de: "Deutsch",
+  fr: "Français",
   ja: "日本語",
   pl: "Polski",
+  ru: "Русский",
 };
 
 export const siteTaglines = {
-  "zh-CN": "AI 原生知识库与印象笔记 / Obsidian 替代方案，支持多端瞬时同步与原生 MCP。Cloudflare 免费托管或 Docker 自托管",
-  "en-US": "AI-native knowledge base & Evernote/Obsidian alternative with instant sync & native MCP. Free on Cloudflare or self-hosted via Docker.",
+  "zh-CN": "AI 原生笔记应用与印象笔记 / Obsidian 替代方案，支持多端瞬时同步与原生 MCP。Cloudflare 免费托管或 Docker 自托管",
+  "zh-TW": zhTwSiteTagline,
+  "en-US": "AI-native note-taking app & Evernote/Obsidian alternative with instant sync & native MCP. Free on Cloudflare or self-hosted via Docker.",
+  es: esSiteTagline,
+  de: deSiteTagline,
+  fr: frSiteTagline,
   ja: jaSiteTagline,
   pl: plSiteTagline,
+  ru: ruSiteTagline,
 } as const satisfies Record<SiteLocale, string>;
 
-const localePrefixPattern = /^\/(en|ja|pl)(?=\/|$)/;
+const localePrefixPattern = /^\/(zh-tw|en|es|de|fr|ja|pl|ru)(?=\/|$)/;
 
 export const stripSiteLocalePrefix = (path: string) => {
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
@@ -44,12 +74,37 @@ export const matchSiteLocale = (locale: string | null | undefined): SiteLocale |
 
   const normalized = locale.trim().replaceAll("_", "-").toLowerCase();
 
+  if (
+    normalized === "zh-tw" ||
+    normalized === "zh-hant" ||
+    normalized.startsWith("zh-tw-") ||
+    normalized.startsWith("zh-hant-") ||
+    normalized === "zh-hk" ||
+    normalized.startsWith("zh-hk-") ||
+    normalized === "zh-mo" ||
+    normalized.startsWith("zh-mo-")
+  ) {
+    return "zh-TW";
+  }
+
   if (normalized === "zh" || normalized.startsWith("zh-")) {
     return "zh-CN";
   }
 
   if (normalized === "en" || normalized.startsWith("en-")) {
     return "en-US";
+  }
+
+  if (normalized === "es" || normalized.startsWith("es-")) {
+    return "es";
+  }
+
+  if (normalized === "de" || normalized.startsWith("de-")) {
+    return "de";
+  }
+
+  if (normalized === "fr" || normalized.startsWith("fr-")) {
+    return "fr";
   }
 
   if (normalized === "ja" || normalized.startsWith("ja-")) {
@@ -60,12 +115,32 @@ export const matchSiteLocale = (locale: string | null | undefined): SiteLocale |
     return "pl";
   }
 
+  if (normalized === "ru" || normalized.startsWith("ru-")) {
+    return "ru";
+  }
+
   return null;
 };
 
 export const getSiteLocale = (pathname: string): SiteLocale => {
+  if (pathname === "/zh-tw" || pathname.startsWith("/zh-tw/")) {
+    return "zh-TW";
+  }
+
   if (pathname === "/en" || pathname.startsWith("/en/")) {
     return "en-US";
+  }
+
+  if (pathname === "/es" || pathname.startsWith("/es/")) {
+    return "es";
+  }
+
+  if (pathname === "/de" || pathname.startsWith("/de/")) {
+    return "de";
+  }
+
+  if (pathname === "/fr" || pathname.startsWith("/fr/")) {
+    return "fr";
   }
 
   if (pathname === "/ja" || pathname.startsWith("/ja/")) {
@@ -74,6 +149,10 @@ export const getSiteLocale = (pathname: string): SiteLocale => {
 
   if (pathname === "/pl" || pathname.startsWith("/pl/")) {
     return "pl";
+  }
+
+  if (pathname === "/ru" || pathname.startsWith("/ru/")) {
+    return "ru";
   }
 
   return "zh-CN";
@@ -110,6 +189,7 @@ export const siteCopy = {
       dockerDeploy: "Docker 部署",
       selfHostedAlternative: "印象笔记替代",
       migration: "从印象笔记迁移",
+      noteMigration: "第三方笔记迁移",
       evernoteMigration: "从印象笔记迁移",
       memosMigration: "从 Memos 迁移",
       notionMigration: "从 Notion 迁移",
@@ -138,6 +218,8 @@ export const siteCopy = {
       clipper: "剪藏插件",
       windows: "Windows",
       linux: "Linux",
+      migrationTitle: "第三方笔记迁入",
+      migrationSubtitle: "原生支持 Evernote、Obsidian、Joplin 及 Notion、flomo 极简迁移",
       imageAlt: "EdgeEver product preview",
       badgeText: "💡 全平台覆盖：macOS、Windows、Linux、iOS、Android、剪藏插件 · 原生 MCP / ACP 协同 · Cloudflare 免费额度 & Docker 一键安装",
     },
@@ -145,7 +227,7 @@ export const siteCopy = {
       eyebrow: "WHY EDGEEVER",
       heading: "重新定义自托管知识工作区",
       subheading: "告别商业笔记的臃肿广告、设备限制与昂贵订阅。每一个设计细节，都旨在打造流畅、开放、隐私可控且原生支持 AI 的第二大脑。",
-      showcaseCta: "查看 19 个真机案例演示与最佳实践",
+      showcaseCta: "查看 20 个真机案例演示与最佳实践",
       card1: {
         badge: "经典重现",
         title: "经典三栏与专注模式，熟悉更轻快",
@@ -205,8 +287,8 @@ export const siteCopy = {
       },
     },
     marquee: {
-      title: "全平台客户端覆盖、自由部署与 AI 智脑生态",
-      subtitle: "从 macOS、原生 iOS、Android 客户端，到 Docker 一键自托管、微信公众号排版与 Remote MCP 协同",
+      title: "原生技术栈、自由部署与 AI 智脑生态",
+      subtitle: "从本地 SQLite 离线架构、ACP / Remote MCP 智能体协同，到 Cloudflare / Docker 自托管与创作者排版",
       items: [
         {
           tag: "macOS 桌面端",
@@ -356,13 +438,13 @@ export const siteCopy = {
           cta: "查看部署指南",
         },
         {
-          title: "从印象笔记迁移",
-          summary: "通过 EdgeEver MCP、evernote-backup 和 ENEX 导入脚本，把旧笔记库迁移到自托管实例。",
-          href: "/blog/evernote-migration-guide",
+          title: "第三方笔记平滑迁入",
+          summary: "原生一键导入印象笔记、Obsidian、Joplin，或通过 AI Agent (MCP) 极简无缝迁移 Notion、flomo、Memos。",
+          href: "/blog/note-migration-guide",
           cta: "查看迁移指南",
         },
         {
-          title: "19 个真机场景与实操指南",
+          title: "20 个真机场景与实操指南",
           summary: "浏览三栏写作、微信与全渠道剪藏、AI 导图/信息图/多维表格、本机 ACP 协同及海报排版实机演示。",
           href: "/guides/best-practices",
           cta: "查看实机案例",
@@ -393,6 +475,7 @@ export const siteCopy = {
       dockerDeploy: "Docker",
       selfHostedAlternative: "Evernote alternative",
       migration: "Migrate from Evernote",
+      noteMigration: "Note Migration Guide",
       evernoteMigration: "Migrate from Evernote",
       memosMigration: "Migrate from Memos",
       notionMigration: "Migrate from Notion",
@@ -421,6 +504,8 @@ export const siteCopy = {
       clipper: "Clipper",
       windows: "Windows",
       linux: "Linux",
+      migrationTitle: "Migrate from Other Apps",
+      migrationSubtitle: "Native import for Evernote, Obsidian, Joplin & Notion, flomo migration",
       imageAlt: "EdgeEver product preview",
       badgeText: "💡 All Platforms: macOS, Windows, Linux, iOS, Android, Web Clipper · Native MCP & ACP Synergy · Cloudflare Free Tier & Docker",
     },
@@ -428,7 +513,7 @@ export const siteCopy = {
       eyebrow: "WHY EDGEEVER",
       heading: "Rebuilt for Self-Hosted Knowledge & AI Workflows",
       subheading: "Say goodbye to ads, device caps, and expensive subscriptions. Every detail is crafted for a fast, open, and private second brain.",
-      showcaseCta: "Explore 19 real-world workflows & screenshots",
+      showcaseCta: "Explore 20 real-world workflows & screenshots",
       card1: {
         badge: "Classic UI",
         title: "Classic Three-Pane Layout, Faster & Lighter",
@@ -488,8 +573,8 @@ export const siteCopy = {
       },
     },
     marquee: {
-      title: "Apps Across Platforms, Flexible Deploy & AI Synergy",
-      subtitle: "From macOS, native iOS & Android apps to Docker self-hosting, styled creator copying, and Remote MCP collaboration.",
+      title: "Native Architecture, Flexible Deploy & AI Synergy",
+      subtitle: "From local SQLite offline sync and ACP / Remote MCP agent workflows to Docker self-hosting and creator styling.",
       items: [
         {
           tag: "macOS Desktop",
@@ -639,13 +724,13 @@ export const siteCopy = {
           cta: "Read deployment guide",
         },
         {
-          title: "Migrate from Evernote",
-          summary: "Use EdgeEver MCP, evernote-backup, and the ENEX import script to migrate an old notes library into your self-hosted instance.",
-          href: "/blog/evernote-migration-guide",
+          title: "Migrate from Third-Party Notes",
+          summary: "Native one-click import for Evernote, Obsidian, and Joplin, or leverage AI Agent & MCP for Notion, flomo, and Memos.",
+          href: "/blog/note-migration-guide",
           cta: "Read migration guide",
         },
         {
-          title: "19 Real-World Workflows",
+          title: "20 Real-World Workflows",
           summary: "Visual walkthrough of three-pane editing, omnichannel clipping, AI diagrams & databases, local ACP agents, and poster design.",
           href: "/guides/best-practices",
           cta: "View showcase",
@@ -661,4 +746,9 @@ export const siteCopy = {
   },
   ja: jaSiteCopy,
   pl: plSiteCopy,
+  "zh-TW": zhTwSiteCopy,
+  es: esSiteCopy,
+  de: deSiteCopy,
+  fr: frSiteCopy,
+  ru: ruSiteCopy,
 } as const;

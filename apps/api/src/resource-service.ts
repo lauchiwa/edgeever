@@ -16,6 +16,11 @@ import { createId, isoNow } from "./entity-utils";
 import { sha256Bytes } from "./hash-utils";
 import { resolveObjectStorage } from "./object-storage";
 import { getWorkspaceId } from "./request-auth";
+import {
+  memoNotebookAccessSql,
+  notebookAccessBinds,
+  type NotebookAccess,
+} from "./token-notebook-access";
 import type { DatabaseAdapter } from "./storage-contract";
 
 export const MAX_IMAGE_UPLOAD_BYTES = 100 * 1024 * 1024;
@@ -234,7 +239,14 @@ export const listResourcesForMcp = async (
   database: DatabaseAdapter,
   workspaceId: string,
   limit: number,
+  notebookAccess?: NotebookAccess,
 ) => {
+  const accessFilter = notebookAccess?.restricted
+    ? `AND ${memoNotebookAccessSql("m.notebook_id", notebookAccess, "read")}`
+    : "";
+  const accessBinds = notebookAccess?.restricted
+    ? notebookAccessBinds(notebookAccess, "read")
+    : [];
   const [rows, stats] = await Promise.all([
     database.prepare(
       `SELECT r.id, r.memo_id, r.original_memo_id, r.bucket_name, r.object_key, r.storage_config_id, r.kind,
@@ -243,10 +255,10 @@ export const listResourcesForMcp = async (
               m.is_deleted AS memo_is_deleted
        FROM resources r
        INNER JOIN memos m ON m.id = r.memo_id
-       WHERE m.workspace_id = ? AND r.is_deleted = 0
+       WHERE m.workspace_id = ? AND r.is_deleted = 0 ${accessFilter}
        ORDER BY r.created_at DESC
        LIMIT ?`,
-    ).bind(workspaceId, limit).all<ResourceListRow>(),
+    ).bind(workspaceId, ...accessBinds, limit).all<ResourceListRow>(),
     database.prepare(
       `SELECT COUNT(*) AS total_count,
               COALESCE(SUM(byte_size), 0) AS total_bytes,
@@ -254,8 +266,8 @@ export const listResourcesForMcp = async (
               COALESCE(SUM(CASE WHEN kind = 'attachment' THEN 1 ELSE 0 END), 0) AS attachment_count
        FROM resources r
        INNER JOIN memos m ON m.id = r.memo_id
-       WHERE m.workspace_id = ? AND r.is_deleted = 0`,
-    ).bind(workspaceId).first<ResourceStatsRow>(),
+       WHERE m.workspace_id = ? AND r.is_deleted = 0 ${accessFilter}`,
+    ).bind(workspaceId, ...accessBinds).first<ResourceStatsRow>(),
   ]);
 
   return {
@@ -403,6 +415,7 @@ export const replaceResourceContent = async (
     resourceId: string;
     expectedContentHash: string;
     filename: string;
+    preserveFilename?: boolean;
     mimeType: string;
     bytes: Uint8Array;
     actor: AuditActor;
@@ -418,33 +431,39 @@ export const replaceResourceContent = async (
   if (current.kind === "image") validateImageUpload(input.mimeType, input.bytes.byteLength);
   else validateAttachmentUpload(input.bytes.byteLength);
 
-  const filename = normalizeFilename(input.filename) || current.filename || input.resourceId;
+  const filename = (input.preserveFilename ? current.filename : normalizeFilename(input.filename)) || current.filename || input.resourceId;
   const mimeType = input.mimeType || "application/octet-stream";
   const contentHash = await sha256Bytes(input.bytes);
   if (
     contentHash === current.sha256
-    && filename === current.filename
+    && (input.preserveFilename || filename === current.filename)
     && mimeType === current.mime_type
   ) return mapResource(current);
 
   const source = await resolveObjectStorage(context.env, current.storage_config_id);
-  const nextObjectKey = `${current.object_key}.version-${createId("blob")}`;
-  await source.store.put(nextObjectKey, input.bytes, {
-    httpMetadata: { contentType: mimeType, cacheControl: "private, max-age=3600" },
-    customMetadata: { memoId: current.memo_id, resourceId: current.id, filename },
-  });
-
-  const now = isoNow();
-  let pointerSwapped = false;
+  // Keep the directory, not the previous version suffix: repeated saves must
+  // not grow beyond filesystem/object-store key limits.
+  const objectDirectory = current.object_key.slice(0, current.object_key.lastIndexOf("/") + 1);
+  const nextObjectKey = `${objectDirectory}${current.id}.version-${createId("blob")}`;
+  let candidateMayBeLive = false;
   try {
+    await source.store.put(nextObjectKey, input.bytes, {
+      httpMetadata: { contentType: mimeType, cacheControl: "private, max-age=3600" },
+      customMetadata: { memoId: current.memo_id, resourceId: current.id, filename },
+    });
+    const now = isoNow();
+    // A failed database response does not prove that its write failed. Retain
+    // bytes once the pointer update is submitted unless it is confirmed unused.
+    candidateMayBeLive = true;
     await context.env.storage.db.prepare(
       `UPDATE resources
-       SET object_key = ?, mime_type = ?, filename = ?, byte_size = ?, sha256 = ?, width = NULL, height = NULL, updated_at = ?
+       SET object_key = ?, mime_type = ?, filename = COALESCE(?, filename), byte_size = ?, sha256 = ?, width = NULL, height = NULL, updated_at = ?
        WHERE id = ? AND sha256 = ? AND is_deleted = 0`,
     ).bind(
       nextObjectKey,
       mimeType,
-      filename,
+      // NULL preserves the value held by this UPDATE, not the earlier read.
+      input.preserveFilename ? null : filename,
       input.bytes.byteLength,
       contentHash,
       now,
@@ -454,9 +473,9 @@ export const replaceResourceContent = async (
 
     const updated = await getResourceRow(context.env.storage.db, workspaceId, current.id);
     if (!updated || updated.object_key !== nextObjectKey) {
+      candidateMayBeLive = false;
       throw new AppError("resource_conflict", "The resource changed while it was being saved.", 409);
     }
-    pointerSwapped = true;
 
     await auditStatement(
       context.env.storage.db,
@@ -476,7 +495,7 @@ export const replaceResourceContent = async (
     await source.store.delete(current.object_key).catch(() => undefined);
     return mapResource(updated);
   } catch (error) {
-    if (!pointerSwapped) await source.store.delete(nextObjectKey).catch(() => undefined);
+    if (!candidateMayBeLive) await source.store.delete(nextObjectKey).catch(() => undefined);
     throw error;
   }
 };

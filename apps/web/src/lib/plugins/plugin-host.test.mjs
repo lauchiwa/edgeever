@@ -264,7 +264,7 @@ describe("EdgeEverPluginHost", () => {
     await host.dispose();
   });
 
-  test("installs a checksum-pinned marketplace package and removes its cache on uninstall", async () => {
+  test("installs checksum-pinned packages on HTTP, rejects tampering, and removes uninstalled caches", async () => {
     const manifest = {
       type: "plugin",
       id: "org.edgeever.marketplace-test",
@@ -313,13 +313,26 @@ describe("EdgeEverPluginHost", () => {
       },
     };
 
-    await host.installMarketplaceEntry(entry);
+    const originalCrypto = Object.getOwnPropertyDescriptor(globalThis, "crypto");
+    Object.defineProperty(globalThis, "crypto", { configurable: true, value: {} });
+    try {
+      await host.installMarketplaceEntry(entry);
 
-    expect(host.getSnapshot().extensions[0].source).toMatchObject({ kind: "marketplace", verified: true });
-    expect(packages.get(`${manifest.id}:${manifest.version}`)?.checksums.mainJs).toBe(entry.verification.checksums.mainJs);
-    await host.uninstall(manifest.id);
-    expect([...packages.keys()].some((key) => key.startsWith(`${manifest.id}:`))).toBe(false);
-    await host.dispose();
+      expect(host.getSnapshot().extensions[0].source).toMatchObject({ kind: "marketplace", verified: true });
+      expect(packages.get(`${manifest.id}:${manifest.version}`)?.checksums.mainJs).toBe(entry.verification.checksums.mainJs);
+      await host.uninstall(manifest.id);
+      expect([...packages.keys()].some((key) => key.startsWith(`${manifest.id}:`))).toBe(false);
+      const originalFetch = globalThis.window.fetch;
+      globalThis.window.fetch = async (input) => String(input).endsWith("/main.js")
+        ? new Response(`${mainJs} // tampered`)
+        : originalFetch(input);
+      await expect(host.installMarketplaceEntry(entry)).rejects.toThrow("mainJs does not match the marketplace verified checksum.");
+      expect(host.getSnapshot().extensions).toHaveLength(0);
+      expect(packages.size).toBe(0);
+    } finally {
+      Object.defineProperty(globalThis, "crypto", originalCrypto);
+      await host.dispose();
+    }
   });
 
   test("rolls back an enabled plugin when an update cannot activate", async () => {
@@ -782,6 +795,21 @@ describe("structured plugin note APIs", () => {
     ] })).rejects.toMatchObject({ code: "INVALID_STRUCTURED_EDIT" });
     expect(f.saves).toHaveLength(0);
     expect((await f.context.diagrams.get("note-1")).diagram.nodes[0].label).toBe("Root");
+  });
+
+  test("keeps the v1 plugin API shape without discarding v2 views on record edits", async () => {
+    const legacy = structured.parseTableDocument(tableMarkdown());
+    const views = [...structured.getTableViews(legacy), {
+      id: "new", name: "Named view", match: "all", filters: [{ fieldId: "name", operator: "neq", value: "Hidden" }], sorts: [],
+    }];
+    const f = setup(structured.serializeTableDocument(structured.saveTableViews(legacy, views)));
+    const read = await f.context.tables.get("note-1");
+    expect(read.table).toEqual(legacy);
+    const result = await f.context.tables.edit("note-1", { ...input(read), operations: [
+      { op: "update_record", recordId: "row", cells: { name: "Edited" } },
+    ] });
+    expect(result.table).toMatchObject({ schemaVersion: 1, records: [{ cells: { name: "Edited" } }] });
+    expect(structured.parseTableDocument(f.getMemo().contentMarkdown).views).toEqual(views);
   });
 
   test("applies table records and cells as one batch and rejects bad values atomically", async () => {

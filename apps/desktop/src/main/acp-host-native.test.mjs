@@ -100,7 +100,7 @@ test("every connection attempt passes an explicit timeout", async () => {
   // withHandshakeTimeout has no default: a call without one would abort at once.
   const source = await readFile(new URL("./acp-host.mjs", import.meta.url), "utf8");
   const calls = source.split("await withHandshakeTimeout(").slice(1);
-  expect(calls.length).toBe(6);
+  expect(calls.length).toBe(8);
   for (const call of calls) {
     let depth = 1;
     let end = 0;
@@ -201,7 +201,9 @@ test("pi gets no session MCP bridge, since pi-acp never connects it, and is told
     expect(report.prompt[0].text).toContain("EdgeEver note tools are not available");
     expect(report.prompt[0].text).toContain("persistent configuration");
     expect(JSON.stringify(report.prompt)).not.toContain("use only the session-provided MCP server");
-    expect(report.prompt.at(-1)).toEqual({ type: "text", text: "List my notes" });
+    expect(report.prompt).toHaveLength(1);
+    expect(report.prompt[0].type).toBe("text");
+    expect(report.prompt[0].text.endsWith("## Current user request\nList my notes")).toBe(true);
 
     expect((await promptEvents(runtime, { adapterId: "piAgent", prompt: "Summarize", noteAccess: false })).at(-1).type).toBe("done");
     report = JSON.parse(await readFile(reportPath, "utf8"));

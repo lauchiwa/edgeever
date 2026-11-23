@@ -1,23 +1,26 @@
 {
-  "version": "2.16.1",
+  "version": "2.31.1",
   "changes": {
     "en-US": [
-      "Preserve unsaved mind-map, flowchart and architecture edits during synchronization, including new-note creation. Thanks @sivdead (#742); fixes #737.",
-      "Preserve infographic drafts and active input during synchronization, and refresh remote changes when the editor is idle.",
-      "Reduce database reads during backups while preserving consistency checks, and improve desktop backup network diagnostics.",
-      "Reduce repeated database counts during pagination, exports, synchronization and task-history polling. Upgrading the server applies migration 0084 with a one-time task-count backfill."
+      "Show a single Google Play update prompt on Android.",
+      "Identify oversized note bodies when an import exceeds the storage limit. Thanks to @sivdead in #871.",
+      "Keep the gallery toolbar open when clicking images in the editor.",
+      "Give the notebook list more space with a compact sidebar and a template shortcut in the new note menu.",
+      "Preserve local diagram and infographic edits when an earlier save finishes syncing."
     ],
     "zh-CN": [
-      "修复思维导图、流程图及架构图在同步和新建笔记时丢失未保存编辑的问题。感谢 @sivdead（#742）；修复 #737。",
-      "修复信息图同步时的草稿与输入丢失问题，并在空闲时正确显示远端更新。",
-      "减少备份过程中的数据库读取，保留一致性检查，并改善桌面备份网络故障诊断。",
-      "减少分页、导出、同步和任务历史轮询中的重复数据库计数。服务端升级会执行迁移 0084，一次性回填任务计数。"
+      "Android 端只显示一次 Google Play 更新提示。",
+      "导入笔记正文超出存储上限时，明确提示失败原因。感谢 @sivdead 在 #871 中的贡献。",
+      "在编辑器中点击图库图片时，保持图库工具栏打开。",
+      "缩小笔记本侧栏顶部控件，为笔记本列表腾出更多空间，并可从新建笔记菜单使用模板。",
+      "较早的保存完成同步时，保留图表和信息图中尚未保存的本地编辑。"
     ],
     "ja": [
-      "同期中や新規ノート作成時に、マインドマップ・フローチャート・構成図の未保存の編集が失われる問題を修正しました。",
-      "インフォグラフィックの同期中に下書きや入力が失われる問題を修正し、編集中でない場合はリモートの変更を正しく反映します。",
-      "バックアップの整合性チェックを維持しながらデータベース読み取りを削減し、デスクトップのネットワーク障害診断を改善しました。",
-      "ページ送り・エクスポート・同期・タスク履歴のポーリング時の重複集計を削減しました。サーバー更新時にマイグレーション0084でタスク件数を一度だけ集計します。"
+      "Android で Google Play の更新確認を 1 回だけ表示します。",
+      "インポートするノートの本文がストレージの上限を超えた場合に、原因を表示します。",
+      "エディターでギャラリー内の画像をクリックしても、ツールバーを開いたままにします。",
+      "サイドバーをコンパクトにしてノートブック一覧を広げ、新規ノートのメニューからテンプレートを使えるようにしました。",
+      "以前の保存内容の同期が完了したときに、図やインフォグラフィックの編集中の変更を保持します。"
     ]
   }
 }

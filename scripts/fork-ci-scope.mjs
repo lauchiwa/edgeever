@@ -22,9 +22,13 @@ export const isDocumentation = (file) => /^(?:docs\/[^\0]+|[^/]+)\.md$/.test(fil
 // scripts/fork-ci-scope.test.mjs fails when a read is missing from this list.
 export const READ_DOCS = new Set([
   "AGENTS.md",
+  "README.de.md",
+  "README.es.md",
+  "README.fr.md",
   "README.ja.md",
   "README.md",
   "README.pl-PL.md",
+  "README.ru.md",
   "README.zh-CN.md",
   "README.zh-TW.md",
   "docs/agent-deploy-cloudflare.md",
@@ -39,6 +43,8 @@ export const READ_DOCS = new Set([
   "docs/evernote-migration-guide.md",
   "docs/manual-deploy.md",
   "docs/manual-deploy.zh-CN.md",
+  "docs/note-migration-guide.en-US.md",
+  "docs/note-migration-guide.md",
   "docs/plugin-development.md",
   "docs/plugin-development.zh-CN.md",
   "docs/self-hosting-architecture.md",
