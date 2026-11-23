@@ -74,11 +74,13 @@ import {
   getMobileEditorImageScaleLabel,
   getMobileEditorImageWidthPresetLabel,
   getMobileEditorCopy,
+  type MobileEditorLocale,
   getMobileEditorPlaceholder,
   getMobileEditorToolbarActionLabel,
   getMobileEditorToolbarLabel,
   type MobileEditorToolbarActionId,
 } from "@edgeever/shared/mobile-editor";
+import { formatAiPartList, type AiDraftIncompleteReason } from "@edgeever/shared/ai-generation";
 import {
   type NoteImageTheme,
   type NoteImageFontStyle,
@@ -152,7 +154,7 @@ type LocalTiptapEditorSharedProps = {
   onReaderScroll?: (collapsed: boolean) => Promise<void>;
   onImageExportEvent?: (payloadJson: string) => Promise<void>;
   ref: Ref<LocalTiptapEditorRef>;
-  locale: "zh-CN" | "en-US" | "ja" | "pl" | "ru";
+  locale: MobileEditorLocale;
   theme: "light" | "dark";
   /** Live-switchable. The same DomWebView stays mounted across viewer → editor. */
   mode?: "editor" | "viewer";
@@ -236,6 +238,14 @@ type MobileAiPanelState = {
   error: string | null;
   generating: boolean;
   requestId: string | null;
+  /**
+   * Why the draft is incomplete; an incomplete draft must not replace the selection (#652).
+   * A new request starts as "interrupted" and only a clean finish clears it.
+   */
+  incomplete?: AiDraftIncompleteReason | null;
+  /** The part a long run is working on, and the parts that kept their source text (#652). */
+  progress?: { part: number; parts: number } | null;
+  incompleteParts?: number[];
 };
 
 type MobileAiBridgePayload = {
@@ -379,30 +389,6 @@ const handleMobileResourceEvent = (
   return false;
 };
 
-let beautifulMermaidRuntime: Promise<typeof import("beautiful-mermaid")> | null = null;
-
-const loadBeautifulMermaid = () => {
-  beautifulMermaidRuntime ??= import("beautiful-mermaid");
-  return beautifulMermaidRuntime;
-};
-
-const renderWithBeautifulMermaid = async (source: string, theme: "light" | "dark") => {
-  try {
-    const { renderMermaidSVG, THEMES } = await loadBeautifulMermaid();
-    return renderMermaidSVG(source, {
-      ...THEMES[theme === "dark" ? "zinc-dark" : "zinc-light"],
-      transparent: true,
-      font: "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif",
-      padding: 12,
-      nodeSpacing: 16,
-      layerSpacing: 28,
-      componentSpacing: 16,
-    });
-  } catch {
-    return null;
-  }
-};
-
 export default function LocalTiptapEditor(props: LocalTiptapEditorProps | MermaidRendererProps) {
   return props.mode === "mermaid-renderer"
     ? <MermaidRenderRuntime {...props} />
@@ -424,30 +410,11 @@ const MermaidRenderRuntime = (props: MermaidRendererProps) => {
         sources = [];
       }
 
-      const mermaid = await loadMermaid();
-      mermaid.initialize({
-        startOnLoad: false,
-        securityLevel: "strict",
-        suppressErrorRendering: true,
-        theme: "base",
-        themeVariables: getMobileMermaidThemeVariables(props.theme),
-        flowchart: { htmlLabels: false },
-      });
-
       const results: Array<{ source: string; svg: string | null }> = [];
       for (const source of sources) {
+        if (cancelled) return;
         try {
-          const beautifulSvg = await renderWithBeautifulMermaid(source, props.theme);
-          if (beautifulSvg) {
-            results.push({ source, svg: inlineMermaidSvgStyles(beautifulSvg) });
-            continue;
-          }
-          const valid = await mermaid.parse(source, { suppressErrors: true });
-          if (!valid) {
-            throw new Error("Invalid Mermaid diagram");
-          }
-          mermaidRenderSequence += 1;
-          const { svg } = await mermaid.render(`edgeever-mobile-mermaid-${mermaidRenderSequence}`, source);
+          const { svg } = await renderMobileMermaid(source, props.theme, false);
           results.push({ source, svg: inlineMermaidSvgStyles(svg) });
         } catch {
           results.push({ source, svg: null });
@@ -480,7 +447,7 @@ const ReadOnlyX6Diagram = ({
   theme,
 }: {
   diagram: DiagramDocument;
-  locale: "zh-CN" | "en-US" | "ja" | "pl" | "ru";
+  locale: MobileEditorLocale;
   theme: "light" | "dark";
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -729,6 +696,7 @@ function LocalTiptapEditorImpl(props: LocalTiptapEditorProps) {
             parameterKind: "none",
             resultMode: "both",
             output: "",
+            incomplete: null,
             error: getMobileEditorCopy(props.locale).ai.promptMissing,
           };
         }
@@ -1134,6 +1102,7 @@ function LocalTiptapEditorImpl(props: LocalTiptapEditorProps) {
       customInstruction: "",
       refineInstruction: "",
       output: "",
+      incomplete: null,
       error: null,
       generating: false,
       requestId: null,
@@ -1167,6 +1136,9 @@ function LocalTiptapEditorImpl(props: LocalTiptapEditorProps) {
     setAiPanel((current) => current ? {
       ...current,
       output: "",
+      incomplete: "interrupted",
+      progress: null,
+      incompleteParts: [],
       error: null,
       generating: true,
       requestId,
@@ -1186,6 +1158,7 @@ function LocalTiptapEditorImpl(props: LocalTiptapEditorProps) {
         ...current,
         generating: false,
         requestId: null,
+        incomplete: current.incomplete === "stopped" ? "stopped" : "interrupted",
         error: requestError instanceof Error ? requestError.message : getMobileEditorCopy(props.locale).ai.generationFailed,
       } : current);
     });
@@ -1201,11 +1174,33 @@ function LocalTiptapEditorImpl(props: LocalTiptapEditorProps) {
         if (payload.event.type === "text-delta") {
           return { ...current, output: current.output + payload.event.text };
         }
+        if (payload.event.type === "text-reset") {
+          return { ...current, output: payload.event.text };
+        }
+        if (payload.event.type === "progress") {
+          return { ...current, progress: { part: payload.event.part, parts: payload.event.parts } };
+        }
         if (payload.event.type === "error") {
-          return { ...current, generating: false, requestId: null, error: payload.event.message };
+          // Text that arrived before the error stays an incomplete draft.
+          return {
+            ...current,
+            generating: false,
+            requestId: null,
+            incomplete: "interrupted",
+            // An interrupted stream is explained by the incomplete notice instead.
+            error: payload.event.code === "ai_stream_interrupted" ? null : payload.event.message,
+          };
         }
         if (payload.event.type === "finish") {
-          return { ...current, generating: false, requestId: null };
+          const incompleteParts = payload.event.incompleteParts ?? [];
+          return {
+            ...current,
+            generating: false,
+            requestId: null,
+            progress: null,
+            incompleteParts,
+            incomplete: payload.event.truncated || incompleteParts.length ? "truncated" : null,
+          };
         }
         return current;
       });
@@ -1217,7 +1212,12 @@ function LocalTiptapEditorImpl(props: LocalTiptapEditorProps) {
   const stopAiSelectionRequest = useCallback(() => {
     if (!aiPanel?.requestId) return;
     void (onAiCancelRef.current ?? ignoreAiRequest)(aiPanel.requestId);
-    setAiPanel((current) => current ? { ...current, generating: false, requestId: null } : current);
+    setAiPanel((current) => current ? {
+      ...current,
+      generating: false,
+      requestId: null,
+      incomplete: current.output ? "stopped" : null,
+    } : current);
   }, [aiPanel?.requestId]);
 
   const applyAiSelectionDraft = useCallback((mode: "append" | "replace") => {
@@ -1232,6 +1232,7 @@ function LocalTiptapEditorImpl(props: LocalTiptapEditorProps) {
     }
     if (mode === "append" && aiPanel.resultMode === "replace") return;
     if (mode === "replace" && aiPanel.resultMode === "append") return;
+    if (mode === "replace" && aiPanel.incomplete) return;
     const replacementDraft = mode === "replace"
       ? normalizeAiSelectionReplacement(aiPanel.output)
       : aiPanel.output;
@@ -1856,7 +1857,7 @@ const MobileSelectionAiPanel = ({
   panel,
   prompts,
 }: {
-  locale: "zh-CN" | "en-US" | "ja" | "pl" | "ru";
+  locale: MobileEditorLocale;
   onApply: (mode: "append" | "replace") => void;
   onChange: Dispatch<SetStateAction<MobileAiPanelState | null>>;
   onClose: () => void;
@@ -1873,7 +1874,7 @@ const MobileSelectionAiPanel = ({
   const update = (next: Partial<MobileAiPanelState>) => onChange((current) => current ? { ...current, ...next } : current);
   const generateDisabled = panel.generating || (!panel.promptId && panel.action === "custom" && !panel.customInstruction.trim());
   const appendDisabled = panel.generating || !panel.output || panel.resultMode === "replace";
-  const replaceDisabled = panel.generating || !panel.output || panel.resultMode === "append";
+  const replaceDisabled = panel.generating || !panel.output || panel.resultMode === "append" || Boolean(panel.incomplete);
   const selectedPrompt = panel.promptId ? prompts.find((prompt) => prompt.id === panel.promptId) ?? null : null;
 
   const persistLastAction = (
@@ -1907,6 +1908,7 @@ const MobileSelectionAiPanel = ({
         parameterKind: prompt.parameterKind,
         resultMode: prompt.resultMode,
         output: "",
+        incomplete: null,
         error: null,
       });
       return;
@@ -1919,6 +1921,7 @@ const MobileSelectionAiPanel = ({
       parameterKind: fallbackPromptParameterKind(action),
       resultMode: fallbackPromptResultMode(action),
       output: "",
+      incomplete: null,
       error: null,
     });
   };
@@ -1963,12 +1966,12 @@ const MobileSelectionAiPanel = ({
     if (picker === "language") {
       const targetLanguage = value as AiTargetLanguage;
       persistLastAction(panel.action, panel.promptId, targetLanguage);
-      update({ targetLanguage, output: "", error: null });
+      update({ targetLanguage, output: "", error: null, incomplete: null });
     }
     if (picker === "tone") {
       const tone = value as AiTone;
       persistLastAction(panel.action, panel.promptId, panel.targetLanguage, tone);
-      update({ tone, output: "", error: null });
+      update({ tone, output: "", error: null, incomplete: null });
     }
     setPicker(null);
   };
@@ -2069,6 +2072,24 @@ const MobileSelectionAiPanel = ({
               </button>
             </div>
           </label>
+        ) : null}
+        {panel.generating && panel.progress ? (
+          <p aria-live="polite" className="edgeever-ai-progress">
+            {getMobileEditorCopy(locale).ai.progressPart
+              .replace("{{part}}", String(panel.progress.part))
+              .replace("{{parts}}", String(panel.progress.parts))}
+          </p>
+        ) : null}
+        {panel.incomplete && panel.output && !panel.generating ? (
+          <p className="edgeever-ai-error" role="alert">
+            {panel.incomplete === "truncated" && panel.incompleteParts?.length
+              ? getMobileEditorCopy(locale).ai.incompleteParts.replace("{{parts}}", formatAiPartList(panel.incompleteParts, locale))
+              : panel.incomplete === "truncated"
+              ? getMobileEditorCopy(locale).ai.incompleteTruncated
+              : panel.incomplete === "stopped"
+                ? getMobileEditorCopy(locale).ai.incompleteStopped
+                : getMobileEditorCopy(locale).ai.incompleteInterrupted}
+          </p>
         ) : null}
         {panel.error ? <p className="edgeever-ai-error" role="alert">{panel.error}</p> : null}
       </div>
@@ -2337,8 +2358,29 @@ const loadMermaid = () => {
   return mermaidRuntime;
 };
 
+let mermaidRenderQueue: Promise<unknown> = Promise.resolve();
+
+const renderMobileMermaid = (source: string, theme: "light" | "dark", htmlLabels = true) => {
+  // Mermaid shares its configuration across renders, including different themes.
+  const result = mermaidRenderQueue.then(async () => {
+    const mermaid = await loadMermaid();
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: "strict",
+      suppressErrorRendering: true,
+      theme: "base",
+      themeVariables: getMobileMermaidThemeVariables(theme),
+      htmlLabels,
+      flowchart: { nodeSpacing: 25, rankSpacing: 30, subGraphTitleMargin: { bottom: 12 } },
+    });
+    return mermaid.render(`edgeever-mobile-mermaid-${++mermaidRenderSequence}`, source);
+  });
+  mermaidRenderQueue = result.catch(() => undefined);
+  return result;
+};
+
 const createMobileCodeBlockExtension = (
-  locale: "zh-CN" | "en-US" | "ja" | "pl" | "ru",
+  locale: MobileEditorLocale,
   theme: "light" | "dark",
   hideCopyForVisualDiagram = false,
 ) => CodeBlock.extend({
@@ -2444,27 +2486,7 @@ const createMobileCodeBlockExtension = (
           message.className = "edgeever-mermaid-message";
           message.textContent = getMobileEditorCopy(locale).codeBlock.rendering;
           preview.replaceChildren(message);
-          void loadMermaid()
-            .then(async (mermaid) => {
-              const beautifulSvg = await renderWithBeautifulMermaid(source, theme);
-              if (beautifulSvg) {
-                return { svg: beautifulSvg };
-              }
-              mermaid.initialize({
-                startOnLoad: false,
-                securityLevel: "strict",
-                suppressErrorRendering: true,
-                theme: "base",
-                themeVariables: getMobileMermaidThemeVariables(theme),
-                flowchart: { nodeSpacing: 25, rankSpacing: 30 },
-              });
-              const valid = await mermaid.parse(source, { suppressErrors: true });
-              if (!valid) {
-                throw new Error("Invalid Mermaid diagram");
-              }
-              mermaidRenderSequence += 1;
-              return mermaid.render(`edgeever-mobile-editor-mermaid-${mermaidRenderSequence}`, source);
-            })
+          void renderMobileMermaid(source, theme)
             .then(({ svg }) => {
               if (activeRequest !== renderRequest) {
                 return;
@@ -2512,7 +2534,7 @@ const createMobileCodeBlockExtension = (
 });
 
 const createMobileImageSizeControls = (
-  locale: "zh-CN" | "en-US" | "ja" | "pl" | "ru",
+  locale: MobileEditorLocale,
   updateWidth: (width: number) => void
 ) => {
   const controls = document.createElement("div");
@@ -2564,7 +2586,7 @@ const createMobileImageSizeControls = (
 
 const createProtectedImageExtension = (
   baseUrl: string,
-  locale: "zh-CN" | "en-US" | "ja" | "pl" | "ru",
+  locale: MobileEditorLocale,
   loadResource: (source: string) => Promise<string | null>,
   options?: {
     readOnly?: boolean | (() => boolean);
@@ -3188,6 +3210,7 @@ const getEditorStyles = (theme: "light" | "dark", options?: { viewer?: boolean }
   .edgeever-ai-refine-row input { min-width: 0; flex: 1; }
   .edgeever-ai-refine-row button, .edgeever-ai-panel-footer button { min-height: 40px; padding: 0 12px; border: 1px solid ${theme === "dark" ? "#475569" : "#cbd5e1"}; border-radius: 9px; background: ${theme === "dark" ? "#111c18" : "#fff"}; color: ${theme === "dark" ? "#f8fafc" : "#0f172a"}; font-weight: 700; }
   .edgeever-ai-panel button:disabled { opacity: 0.42; }
+  .edgeever-ai-progress { margin: 0; color: ${theme === "dark" ? "#a1a1aa" : "#52525b"}; font-size: 13px; line-height: 1.45; }
   .edgeever-ai-error { margin: 0; color: ${theme === "dark" ? "#fda4af" : "#be123c"}; font-size: 13px; line-height: 1.45; }
   .edgeever-ai-panel-footer { display: grid; flex: 0 0 auto; gap: 9px; padding: 10px 12px max(10px, env(safe-area-inset-bottom)); border-top: 1px solid ${theme === "dark" ? "#334155" : "#e2e8f0"}; background: ${theme === "dark" ? "#111c18" : "#fff"}; }
   .edgeever-ai-panel-footer > div { display: flex; gap: 8px; }

@@ -1,19 +1,19 @@
 name: Test
 
-# Runs the non-E2E regression suite, lint, type checks and the web build for every
-# pull request and every push to main, so failures surface before a release
-# instead of in the release workflow.
+# Run lint, type checks, the web build and non-E2E regression tests.
 on:
   pull_request:
     paths-ignore:
       - "**/*.md"
       - "docs/**"
+      - "marketing/video/**"
   push:
     branches:
       - main
     paths-ignore:
       - "**/*.md"
       - "docs/**"
+      - "marketing/video/**"
   workflow_dispatch:
 
 permissions:

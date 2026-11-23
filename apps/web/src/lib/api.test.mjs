@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, spyOn, test } from "bun:test";
 import { createAiDirectRuntime } from "../../../desktop/src/main/ai-direct.mjs";
 
 const storage = new Map();
@@ -90,6 +90,7 @@ const {
   clearCachedDesktopSession,
   getConfiguredDesktopApiBaseUrl,
   getCachedDesktopSession,
+  getWorkspaceSession,
   getOrCreateClientDeviceId,
   saveDesktopApiBaseUrl,
 } = await import("./api.ts?desktop-ai-routing-test");
@@ -515,7 +516,7 @@ describe("desktop instance setup", () => {
     await expect(api.getSession()).resolves.toMatchObject({ authenticated: false });
     await Promise.resolve();
     expect(secureSessionToken).toBe("");
-    expect(events).toEqual(["edgeever:unauthorized"]);
+    expect(events).toEqual([]);
 
     globalThis.fetch = async () => Response.json({
       authRequired: true,
@@ -691,4 +692,216 @@ describe("desktop instance setup", () => {
   });
 
   test("infographic authentication errors never invoke instance generation",async()=>{const paths=[];globalThis.fetch=async url=>{paths.push(String(url));return Response.json({error:{code:"unauthorized",message:"Sign in"}},{status:401});};await expect(api.streamInfographicAgent({prompt:"Make a list",currentContent:"",candidates:["list-grid-simple"],history:[]},{onEvent(){}})).rejects.toMatchObject({status:401});expect(paths.filter(path=>path.includes("/ai/"))).toHaveLength(1);expect(paths[0]).toContain("/api/v1/ai/infographic-agent/prepare");});
+});
+
+
+describe("desktop workspace during a server outage", () => {
+  const session = {
+    authRequired: true, authenticated: true, demoMode: false,
+    sessionToken: "offline-workspace-token",
+    user: { id: "offline-user", username: "offline", displayName: null, role: "owner" },
+  };
+  const establishSession = async () => {
+    storage.set(DESKTOP_API_BASE_URL_STORAGE_KEY, "https://notes.example.com");
+    globalThis.fetch = async () => Response.json(session);
+    await cacheDesktopSession(await api.login({ username: "offline", password: "test" }));
+    events.length = 0;
+  };
+
+  test("a hanging startup request reaches the cached workspace after a bounded wait", async () => {
+    await establishSession();
+    const nativeTimeout = AbortSignal.timeout;
+    const timeout = spyOn(AbortSignal, "timeout").mockImplementation(() => nativeTimeout(5));
+    globalThis.fetch = (_url, init) => new Promise((_, reject) => {
+      init.signal.addEventListener("abort", () => reject(init.signal.reason), { once: true });
+    });
+    try {
+      expect(await getWorkspaceSession()).toMatchObject({ authenticated: true, user: session.user });
+      expect(timeout).toHaveBeenCalledWith(8_000);
+      expect(secureSessionToken).toBe(session.sessionToken);
+    } finally {
+      timeout.mockRestore();
+    }
+  });
+
+  test("desktop sign-out works during an outage and preserves the instance and unrelated local data", async () => {
+    for (const failure of ["network", 503, 401]) {
+      await establishSession();
+      storage.set("local-notes-and-outbox", "pending original instance changes");
+      const requests = [];
+      globalThis.fetch = async (url, init) => {
+        requests.push([String(url), new Headers(init.headers).get("Authorization")]);
+        if (failure === "network") throw new TypeError("fetch failed");
+        return new Response("unavailable", { status: failure });
+      };
+      expect(await api.logout()).toEqual({ ok: true });
+      expect(requests[0]).toEqual(["https://notes.example.com/api/v1/auth/logout", `Bearer ${session.sessionToken}`]);
+      expect(secureSessionToken).toBe("");
+      expect(getCachedDesktopSession()).toBeNull();
+      expect(getConfiguredDesktopApiBaseUrl()).toBe("https://notes.example.com");
+      expect(storage.get("local-notes-and-outbox")).toBe("pending original instance changes");
+      expect(events).toEqual([]);
+      // Reloading against an unavailable server cannot restore the old account.
+      globalThis.fetch = async () => { throw new TypeError("fetch failed"); };
+      await expect(getWorkspaceSession()).rejects.toBeInstanceOf(TypeError);
+    }
+    storage.delete("local-notes-and-outbox");
+  });
+
+  test("a hanging logout is aborted before native sign-out completes", async () => {
+    await establishSession();
+    const nativeTimeout = AbortSignal.timeout;
+    const timeout = spyOn(AbortSignal, "timeout").mockImplementation(() => nativeTimeout(5));
+    let requestSignal;
+    globalThis.fetch = (_url, init) => new Promise((_, reject) => {
+      requestSignal = init.signal;
+      init.signal.addEventListener("abort", () => reject(init.signal.reason), { once: true });
+    });
+    try {
+      expect(await api.logout()).toEqual({ ok: true });
+      expect(timeout).toHaveBeenCalledWith(3_000);
+      expect(requestSignal.aborted).toBe(true);
+      expect(secureSessionToken).toBe("");
+      expect(getCachedDesktopSession()).toBeNull();
+    } finally {
+      timeout.mockRestore();
+    }
+  });
+
+  test("native credential removal failure remains retryable without claiming sign-out succeeded", async () => {
+    await establishSession();
+    globalThis.fetch = async () => { throw new TypeError("fetch failed"); };
+    const clearSessionToken = window.edgeeverDesktop.clearSessionToken;
+    window.edgeeverDesktop.clearSessionToken = async () => { throw new Error("credential file locked"); };
+    try {
+      await expect(api.logout()).rejects.toThrow("credential file locked");
+      expect(getCachedDesktopSession()).toMatchObject({ authenticated: true });
+      expect(secureSessionToken).toBe(session.sessionToken);
+    } finally {
+      window.edgeeverDesktop.clearSessionToken = clearSessionToken;
+    }
+    expect(await api.logout()).toEqual({ ok: true });
+    expect(getCachedDesktopSession()).toBeNull();
+  });
+
+  test("web sign-out still requires server confirmation", async () => {
+    await establishSession();
+    window.edgeeverDesktop.isAvailable = false;
+    globalThis.fetch = async () => { throw new TypeError("fetch failed"); };
+    try {
+      await expect(api.logout()).rejects.toBeInstanceOf(TypeError);
+      expect(secureSessionToken).toBe(session.sessionToken);
+    } finally {
+      window.edgeeverDesktop.isAvailable = true;
+    }
+  });
+
+  test("opens the cached desktop account on 500/503, quota, throttling and network failures while online", async () => {
+    await establishSession();
+    for (const status of [500, 502, 503, 504, 408, 429]) {
+      globalThis.fetch = async () => Response.json({ error: { code: "database_daily_quota_exceeded", message: "Unavailable" } }, { status });
+      expect(await getWorkspaceSession()).toMatchObject({ authenticated: true, user: session.user });
+      expect(secureSessionToken).toBe(session.sessionToken);
+    }
+    globalThis.fetch = async () => { throw new TypeError("fetch failed"); };
+    expect(await getWorkspaceSession()).toMatchObject({ authenticated: true, user: session.user });
+    expect(events).toEqual([]);
+  });
+
+  test("failed 401 confirmation never clears the local account or credential", async () => {
+    await establishSession();
+    for (const failure of [500, 503, 429, "network", "invalid-json", "invalid-session"]) {
+      globalThis.fetch = async url => {
+        if (!String(url).endsWith("/api/v1/auth/session")) return Response.json({ error: { code: "unauthorized" } }, { status: 401 });
+        if (failure === "network") throw new TypeError("fetch failed");
+        if (failure === "invalid-json") return new Response("<html>proxy</html>");
+        if (failure === "invalid-session") return Response.json({});
+        return Response.json({ error: { message: "unavailable" } }, { status: failure });
+      };
+      await expect(api.syncBootstrap({ limit: 200 })).rejects.toMatchObject({ status: 401 });
+      await new Promise(resolve => setTimeout(resolve, 0));
+      expect(getCachedDesktopSession()).toMatchObject({ authenticated: true, user: session.user });
+      expect(secureSessionToken).toBe(session.sessionToken);
+      expect(events).toEqual([]);
+    }
+  });
+
+  test("malformed session responses preserve the established account", async () => {
+    await establishSession();
+    for (const response of [{}, { authenticated: false }, null]) {
+      globalThis.fetch = async () => Response.json(response);
+      expect(await getWorkspaceSession()).toMatchObject({ authenticated: true, user: session.user });
+      expect(secureSessionToken).toBe(session.sessionToken);
+    }
+    expect(events).toEqual([]);
+  });
+
+  test("first launch and a different instance cannot borrow an old local identity", async () => {
+    await establishSession();
+    clearCachedDesktopSession();
+    globalThis.fetch = async () => new Response("unavailable", { status: 503 });
+    await expect(getWorkspaceSession()).rejects.toMatchObject({ status: 503 });
+    await establishSession();
+    let rejectRequest;
+    globalThis.fetch = () => new Promise((_, reject) => { rejectRequest = reject; });
+    const pending = getWorkspaceSession();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    storage.set(DESKTOP_API_BASE_URL_STORAGE_KEY, "https://other.example.com");
+    rejectRequest(new TypeError("fetch failed"));
+    await expect(pending).rejects.toBeInstanceOf(TypeError);
+    storage.set(DESKTOP_API_BASE_URL_STORAGE_KEY, "https://notes.example.com");
+  });
+
+  test("a delayed session rejection cannot clear a newly established credential", async () => {
+    await establishSession();
+    let finish;
+    globalThis.fetch = () => new Promise(resolve => { finish = resolve; });
+    const pending = getWorkspaceSession();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    await cacheDesktopSession({ ...session, sessionToken: "newer-offline-token" });
+    finish(Response.json({ error: { code: "unauthorized" } }, { status: 401 }));
+    await expect(pending).rejects.toMatchObject({ status: 401 });
+    expect(secureSessionToken).toBe("newer-offline-token");
+    expect(getCachedDesktopSession()).toMatchObject({ authenticated: true, user: session.user });
+    expect(events).toEqual([]);
+  });
+
+  test("replacement credentials do not reuse an older in-flight rejection confirmation", async () => {
+    await establishSession();
+    let finishOldConfirmation;
+    let probes = 0;
+    globalThis.fetch = async (url, init) => {
+      if (!String(url).endsWith("/api/v1/auth/session")) return Response.json({ error: { code: "unauthorized" } }, { status: 401 });
+      probes++;
+      if (new Headers(init?.headers).get("Authorization") === `Bearer ${session.sessionToken}`) {
+        return new Promise(resolve => { finishOldConfirmation = resolve; });
+      }
+      return new Response("unavailable", { status: 503 });
+    };
+    await expect(api.syncBootstrap({ limit: 200 })).rejects.toMatchObject({ status: 401 });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(finishOldConfirmation).toBeFunction();
+    await cacheDesktopSession({ ...session, sessionToken: "replacement-during-confirmation" });
+    await expect(api.syncBootstrap({ limit: 200 })).rejects.toMatchObject({ status: 401 });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(probes).toBe(2);
+    finishOldConfirmation(Response.json({ authRequired: true, authenticated: false, demoMode: false, user: null }));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(secureSessionToken).toBe("replacement-during-confirmation");
+    expect(getCachedDesktopSession()).toMatchObject({ authenticated: true, user: session.user });
+    expect(events).toEqual([]);
+  });
+
+  test("explicit session rejection still requires login and clears cached credentials", async () => {
+    for (const status of [200, 401]) {
+      await establishSession();
+      globalThis.fetch = async () => status === 200
+        ? Response.json({ authRequired: true, authenticated: false, demoMode: false, user: null })
+        : Response.json({ error: { code: "unauthorized" } }, { status: 401 });
+      expect((await getWorkspaceSession()).authenticated).toBe(false);
+      expect(getCachedDesktopSession()).toBeNull();
+      expect(secureSessionToken).toBe("");
+      expect(events).toEqual([]);
+    }
+  });
 });

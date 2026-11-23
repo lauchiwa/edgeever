@@ -42,7 +42,7 @@ import {
   saveMobileResourceAs,
   type MobileResourceTarget,
 } from "../lib/mobile-attachments";
-import { localizeUntitledMemoTitle, useMobileLocale, getMobileCatalog, formatMobileCopy } from "../lib/mobile-locale";
+import { localizeUntitledMemoTitle, useMobileLocale, getMobileCatalog, formatMobileCopy, type MobileLocale } from "../lib/mobile-locale";
 import {
   createOnceProtectedResourceFailureNotifier,
   isProtectedResourceSource,
@@ -53,7 +53,7 @@ import { useMobileNoteImagePreferences } from "../hooks/useMobileNoteImagePrefer
 import { useMobileRichEditor, type MobileMemoUpdateMutation } from "../hooks/useMobileRichEditor";
 import type { MobileMemoDraft } from "../lib/mobile-drafts";
 import { createMobileDataScope } from "../lib/local-mirror";
-import { useMobileTheme } from "../lib/mobile-theme";
+import { resolveMobileThemeStyles, useMobileTheme } from "../lib/mobile-theme";
 import { useSession } from "../lib/session";
 import { beginEditorStartup } from "../lib/startup-performance";
 import type { MobileSyncQueueItem } from "../lib/sync-queue";
@@ -169,7 +169,7 @@ const loadAuthenticatedImageDataUrl = (
 };
 
 const alertProtectedImageLoadFailure = (
-  locale: "zh-CN" | "en-US" | "ja" | "pl" | "ru",
+  locale: MobileLocale,
   failure: ProtectedResourceLoadFailure
 ) => {
   const statusLabel = failure.status != null ? String(failure.status) : getMobileCatalog(locale).mobile.common.networkError;
@@ -498,6 +498,8 @@ export const MemoDetailModal = ({
 }) => {
   const { client, session } = useSession();
   const { resolvedTheme } = useMobileTheme();
+  const imageShareStyles = useMemo(() => resolveMobileThemeStyles(baseImageShareStyles, resolvedTheme), [resolvedTheme]);
+  const detailLayoutStyles = useMemo(() => resolveMobileThemeStyles(baseDetailLayoutStyles, resolvedTheme), [resolvedTheme]);
   const { resolvedLocale } = useMobileLocale();
   const safeAreaInsets = useSafeAreaInsets();
   const [actionsOpen, setActionsOpen] = useState(false);
@@ -1696,7 +1698,7 @@ export const MemoDetailModal = ({
                     ? getMobileCatalog(resolvedLocale).fontLoad.templateLoading
                     : getMobileCatalog(resolvedLocale).fontLoad.templateFallback}</Text>
                   {!isExportingImage ? <Pressable accessibilityRole="button" onPress={() => imageFontRecoveryRef.current?.retry()} style={imageShareStyles.previewSecondaryButton}>
-                    <Text>{getMobileCatalog(resolvedLocale).fontLoad.retry}</Text>
+                    <Text style={imageShareStyles.previewSecondaryButtonText}>{getMobileCatalog(resolvedLocale).fontLoad.retry}</Text>
                   </Pressable> : null}
                 </View>
               ) : null}
@@ -1794,7 +1796,7 @@ export const MemoDetailModal = ({
                         <View style={{ height: 2, width: 32, backgroundColor: NOTE_IMAGE_THEMES[item.id].textColor, marginBottom: 4 }} />
                         <View style={{ height: 6, borderLeftWidth: 2, borderLeftColor: NOTE_IMAGE_THEMES[item.id].quoteBorder, backgroundColor: NOTE_IMAGE_THEMES[item.id].quoteBg }} />
                       </View>
-                      <Text numberOfLines={1} style={[imageShareStyles.themeLabel, { color: item.id === "book" || item.id === "black-sun" ? "#f8fafc" : "#1f2937" }, isSelected && imageShareStyles.themeLabelActive]}>
+                      <Text numberOfLines={1} style={[imageShareStyles.themeLabel, { color: item.id === "black-sun" ? "#f8fafc" : "#1f2937" }, isSelected && imageShareStyles.themeLabelActive]}>
                         {label}
                       </Text>
                     </Pressable>
@@ -2091,7 +2093,7 @@ export const MemoDetailModal = ({
   );
 };
 
-const imageShareStyles = StyleSheet.create({
+const baseImageShareStyles = StyleSheet.create({
   sheetContainer: {
     height: "85%",
     paddingBottom: 16,
@@ -2286,7 +2288,7 @@ const imageShareStyles = StyleSheet.create({
   previewWarning: {
     backgroundColor: "#fffbeb",
     borderRadius: 8,
-    color: "#a16207",
+    color: "#92400e",
     fontSize: 13,
     lineHeight: 20,
     marginTop: 12,
@@ -2359,7 +2361,7 @@ const imageShareStyles = StyleSheet.create({
   },
 });
 
-const detailLayoutStyles = StyleSheet.create({
+const baseDetailLayoutStyles = StyleSheet.create({
   metadataCancel: {
     backgroundColor: "#f1f5f9",
   },

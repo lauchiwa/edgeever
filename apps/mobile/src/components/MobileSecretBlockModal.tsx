@@ -1,3 +1,4 @@
+import type { MobileLocale } from "../lib/mobile-locale";
 import { useEffect, useRef, useState } from "react";
 import { AppState, Modal, ScrollView, StyleSheet, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
@@ -21,7 +22,7 @@ export const MobileSecretBlockModal = ({
   theme,
 }: {
   block: SecretBlockAttributes | null;
-  locale: "zh-CN" | "en-US" | "ja" | "pl" | "ru";
+  locale: MobileLocale;
   onClose: () => void;
   theme: "light" | "dark";
 }) => {

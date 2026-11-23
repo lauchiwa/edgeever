@@ -4,6 +4,7 @@
 @import "./editor-themes/index.css";
 @import "./publish-layout.css";
 @import "./note-prose.css";
+@import "./note-prose-styles.css";
 @import "./code-highlight-dark.css";
 
 @source "../../node_modules/streamdown/dist";
@@ -140,6 +141,17 @@
 .edgeever-infographic-selected-text {
   outline: 2px solid #3384f5;
   outline-offset: 2px;
+}
+
+.edgeever-infographic-text-editable foreignObject:is([data-element-type="title"], [data-element-type="desc"], [data-element-type="item-label"], [data-element-type="item-desc"]) {
+  cursor: text;
+}
+
+@media (hover: hover) {
+  .edgeever-infographic-text-editable foreignObject:is([data-element-type="title"], [data-element-type="desc"], [data-element-type="item-label"], [data-element-type="item-desc"]):hover:not(.edgeever-infographic-selected-text) {
+    outline: 1px dashed #94a3b8;
+    outline-offset: 2px;
+  }
 }
 
 .edgeever-infographic-preview > svg {
@@ -520,6 +532,16 @@ html:has([data-site-theme]) #root {
   overflow: auto;
 }
 
+/* The document scrolls; non-scrolling wrappers must not capture sticky rails. */
+html:has(.edgeever-public-share) body,
+html:has(.edgeever-public-share) #root {
+  overflow: visible;
+}
+
+html:has(.edgeever-public-share) body.yarl__no_scroll {
+  overflow: hidden;
+}
+
 html.edgeever-mobile-native-editing,
 html.edgeever-mobile-native-editing body,
 html.edgeever-mobile-native-editing #root {
@@ -646,6 +668,10 @@ html[data-edgeever-extension-theme] kbd {
 
 .edgeever-create-memo-split {
   container-type: inline-size;
+}
+
+.edgeever-create-memo-icon {
+  background-image: linear-gradient(135deg, #36d98e, #12c578);
 }
 
 .edgeever-create-memo-split__more-label {
@@ -1746,15 +1772,15 @@ html[data-edgeever-extension-theme] .edgeever-memo-divider {
   background: #f3f5f7;
 }
 
-.ProseMirror code {
+.ProseMirror :not(pre) > code {
   border: 0;
   border-radius: 4px;
-  background: #e9edf1;
-  box-shadow: inset 0 0 0 1px rgb(61 68 80 / 0.08);
-  padding: 0.08em 0.28em;
+  background: #f3f4f6;
+  box-shadow: none;
+  padding: 2px 6px;
   font-size: var(--editor-code-font-size, 0.875em);
-  font-weight: 400;
-  color: #3d4450;
+  font-weight: 600;
+  color: #1f2937;
   font-family: "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
@@ -1832,11 +1858,9 @@ html[data-edgeever-extension-theme] .edgeever-memo-divider {
 }
 
 .ProseMirror .edgeever-mermaid-toolbar {
-  position: absolute;
-  top: 0.5rem;
-  right: 0.5rem;
-  z-index: 2;
   display: flex;
+  width: fit-content;
+  margin: 0 0 0.25rem auto;
   gap: 0.25rem;
   padding: 0.25rem;
   border: 1px solid #e3ece7;
@@ -1844,6 +1868,13 @@ html[data-edgeever-extension-theme] .edgeever-memo-divider {
   background: rgb(255 255 255 / 0.94);
   box-shadow: 0 1px 3px rgb(15 23 42 / 0.08);
   backdrop-filter: blur(6px);
+}
+
+@media (hover: hover) and (pointer: fine) and (not (any-pointer: coarse)) {
+  .ProseMirror .edgeever-mermaid-code-block:not(:hover):not(:focus-within) .edgeever-mermaid-toolbar {
+    opacity: 0;
+    pointer-events: none;
+  }
 }
 
 .ProseMirror .edgeever-mermaid-tool-button {
@@ -1964,25 +1995,42 @@ html[data-edgeever-extension-theme] .edgeever-memo-divider {
   border-top: 1px solid var(--memo-content-divider-color);
 }
 
-/* Semantic merge boundaries — stronger than decorative theme hairlines. */
+/* Semantic merge boundaries — soft faded hairline to avoid visual clutter. */
 .ProseMirror hr.edgeever-merge-divider,
 .ProseMirror hr[data-edgeever-merge-divider] {
   margin: var(--memo-content-divider-spacing) 0;
-  height: 0;
+  height: 1px;
   border: 0;
-  border-top: 2px solid var(--memo-content-divider-color);
-  background: transparent;
+  background: linear-gradient(
+    to right,
+    transparent,
+    color-mix(in srgb, currentColor 20%, transparent) 16%,
+    color-mix(in srgb, currentColor 20%, transparent) 84%,
+    transparent
+  );
 }
 
-.ProseMirror img {
+.ProseMirror img:not(.ProseMirror-separator),
+.markdown-content img {
   display: block;
   max-width: 100%;
   max-height: min(68vh, 720px);
   height: auto;
   object-fit: contain;
   margin: 1rem 0;
-  border: 1px solid hsl(var(--border));
-  border-radius: 8px;
+  box-sizing: border-box;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 6px;
+  box-shadow: 0 4px 12px -2px rgba(0, 0, 0, 0.08);
+}
+
+:root.dark .ProseMirror img:not(.ProseMirror-separator),
+:root.dark .markdown-content img {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 4px 12px -2px rgba(0, 0, 0, 0.35);
 }
 
 .ProseMirror img.ProseMirror-selectednode {
@@ -2285,6 +2333,11 @@ html[data-edgeever-extension-theme] .edgeever-memo-divider {
   max-height: 18rem;
   margin: 0;
   object-fit: cover;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  box-shadow: none;
+  background: transparent;
 }
 
 /* Height fit keeps the full source image inside a consistent gallery tile. */
@@ -2308,8 +2361,6 @@ html[data-edgeever-extension-theme] .edgeever-memo-divider {
 
 .ProseMirror .edgeever-image-gallery__toolbar {
   position: absolute;
-  bottom: 100%;
-  inset-inline-start: 0;
   z-index: 10;
   visibility: hidden;
   pointer-events: none;
@@ -2317,7 +2368,6 @@ html[data-edgeever-extension-theme] .edgeever-memo-divider {
   flex-wrap: wrap;
   width: fit-content;
   max-width: 100%;
-  margin-bottom: 0.5rem;
   align-items: center;
   gap: 0.25rem;
   border: 1px solid hsl(var(--border));
@@ -2336,8 +2386,12 @@ html[data-edgeever-extension-theme] .edgeever-memo-divider {
   height: 0.5rem;
 }
 
-.ProseMirror .edgeever-image-gallery:hover > .edgeever-image-gallery__toolbar,
-.ProseMirror .edgeever-image-gallery:focus-within > .edgeever-image-gallery__toolbar {
+.ProseMirror .edgeever-image-gallery__toolbar[data-placement^="bottom"]::after {
+  top: auto;
+  bottom: 100%;
+}
+
+.ProseMirror .edgeever-image-gallery__toolbar[data-visible="true"] {
   visibility: visible;
   pointer-events: auto;
 }
@@ -2642,16 +2696,16 @@ html[data-edgeever-extension-theme] .edgeever-memo-divider {
   line-height: 1.5;
   margin: 1rem 0;
 }
-.markdown-content code {
+.markdown-content :not(pre) > code {
   font-family: "JetBrains Mono", "Fira Code", monospace;
-  background-color: #e9edf1;
-  box-shadow: inset 0 0 0 1px rgb(61 68 80 / 0.08);
-  color: #3d4450;
+  background-color: #f3f4f6;
+  box-shadow: none;
+  color: #1f2937;
   border: 0;
-  padding: 0.08em 0.28em;
+  padding: 2px 6px;
   border-radius: 4px;
   font-size: 0.8rem;
-  font-weight: 400;
+  font-weight: 600;
 }
 .markdown-content pre code {
   background-color: transparent;
@@ -2771,11 +2825,25 @@ html[data-edgeever-extension-theme] .edgeever-memo-divider {
 
 .ProseMirror th,
 .markdown-content th {
-  background: rgb(var(--slate-100-rgb) / 0.75);
-  color: #0f172a;
+  background: #f3f4f6;
+  color: #111827;
   font-size: 0.84rem;
-  font-weight: 600;
+  font-weight: 700;
   letter-spacing: -0.01em;
+}
+
+.ProseMirror th strong,
+.ProseMirror th b,
+.markdown-content th strong,
+.markdown-content th b {
+  color: inherit;
+}
+
+.ProseMirror td strong,
+.ProseMirror td b,
+.markdown-content td strong,
+.markdown-content td b {
+  color: #111827;
 }
 
 .ProseMirror th:last-child,
@@ -2792,7 +2860,7 @@ html[data-edgeever-extension-theme] .edgeever-memo-divider {
 
 .ProseMirror tbody tr:nth-child(even) td,
 .markdown-content tbody tr:nth-child(even) td {
-  background: rgb(var(--slate-50-rgb) / 0.5);
+  background: #f9fafb;
 }
 
 .ProseMirror tbody tr:hover td,
@@ -2844,8 +2912,15 @@ html[data-edgeever-extension-theme] .edgeever-memo-divider {
 
 :root.dark .ProseMirror th,
 :root.dark .markdown-content th {
-  background: rgb(255 255 255 / 0.035);
+  background: rgb(255 255 255 / 0.06);
   color: hsl(var(--foreground));
+}
+
+:root.dark .ProseMirror td strong,
+:root.dark .ProseMirror td b,
+:root.dark .markdown-content td strong,
+:root.dark .markdown-content td b {
+  color: #f3f4f6;
 }
 
 :root.dark .ProseMirror .tableWrapper,
@@ -2886,11 +2961,11 @@ html[data-edgeever-extension-theme] .edgeever-memo-divider {
   background: rgb(255 255 255 / 0.05);
 }
 
-:root.dark .ProseMirror code,
-:root.dark .markdown-content code {
-  background: rgb(255 255 255 / 0.09);
-  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.08);
-  color: hsl(var(--foreground));
+:root.dark .ProseMirror :not(pre) > code,
+:root.dark .markdown-content :not(pre) > code {
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: none;
+  color: #e5e7eb;
 }
 
 :root.dark .ProseMirror pre code,

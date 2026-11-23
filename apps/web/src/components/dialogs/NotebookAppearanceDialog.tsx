@@ -1,4 +1,4 @@
-import { useId, useState, type FormEvent } from "react";
+import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Bold,
@@ -60,8 +60,19 @@ export const NotebookAppearanceDialog = ({
   const [visibleIconCount, setVisibleIconCount] = useState(40);
   const [iconQuery, setIconQuery] = useState("");
   const [iconOpen, setIconOpen] = useState(false);
+  const iconTriggerRef = useRef<HTMLButtonElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
   const [saving, setSaving] = useState(false);
   const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    const form = formRef.current;
+    if (failed && !saving && form) {
+      form.scrollTo({
+        top: form.scrollHeight,
+        behavior: "smooth",
+      });
+    }
+  }, [failed, saving]);
   const validColor = color === "" || isNotebookColor(color);
   const validTextColor = textColor === "" || isNotebookColor(textColor);
   const icons = searchAvailableNotebookIcons(iconQuery);
@@ -97,22 +108,27 @@ export const NotebookAppearanceDialog = ({
     >
       <DialogContent
         aria-describedby={undefined}
-        className="max-h-[90dvh] w-[calc(100%-2rem)] max-w-[520px] gap-0 overflow-hidden p-0"
+        className="flex max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-[520px] flex-col gap-0 overflow-hidden p-0"
         showCloseButton={!saving}
         onEscapeKeyDown={(event) => {
           if (iconOpen) {
             event.preventDefault();
             setIconOpen(false);
+            iconTriggerRef.current?.focus();
           }
         }}
       >
-        <DialogHeader className="border-b border-slate-200 px-5 py-5 pr-12 text-left">
+        <DialogHeader className="shrink-0 border-b border-slate-200 px-5 py-5 pr-12 text-left">
           <DialogTitle className="flex items-center gap-2 text-sm leading-6">
             <Palette className="h-5 w-5 text-slate-700" />
             {t("notebookAppearance.title")}
           </DialogTitle>
         </DialogHeader>
-        <form onSubmit={save} className="min-h-0 overflow-y-auto">
+        <form
+          ref={formRef}
+          onSubmit={save}
+          className="max-h-[calc(100dvh-7rem)] overflow-y-auto"
+        >
           <fieldset
             disabled={saving}
             className="min-w-0 space-y-5 bg-slate-50/70 px-5 py-5"
@@ -142,11 +158,12 @@ export const NotebookAppearanceDialog = ({
                         event.preventDefault();
                         event.stopPropagation();
                         setIconOpen(false);
-                        event.currentTarget.querySelector("button")?.focus();
+                        iconTriggerRef.current?.focus();
                       }
                     }}
                   >
                     <button
+                      ref={iconTriggerRef}
                       type="button"
                       aria-label={t("notebookAppearance.icon")}
                       aria-expanded={iconOpen}
@@ -176,6 +193,10 @@ export const NotebookAppearanceDialog = ({
                           <Input
                             autoFocus
                             value={iconQuery}
+                            onKeyDown={(event) => {
+                              // Searching must not submit the appearance form.
+                              if (event.key === "Enter") event.preventDefault();
+                            }}
                             onChange={(event) => {
                               setIconQuery(event.target.value);
                               setVisibleIconCount(40);
@@ -209,6 +230,9 @@ export const NotebookAppearanceDialog = ({
                                 type="button"
                                 role="option"
                                 aria-selected={icon === item.id}
+                                // Safari does not focus clicked buttons; keep the search
+                                // focused until the option's click handler has run.
+                                onMouseDown={(event) => event.preventDefault()}
                                 onClick={() => {
                                   setIcon(item.id);
                                   setIconOpen(false);
@@ -365,11 +389,11 @@ export const NotebookAppearanceDialog = ({
             </div>
           </fieldset>
           {failed && (
-            <p role="alert" className="text-sm text-rose-600">
+            <p role="alert" className="text-sm text-rose-600 pl-5">
               {t("notebookAppearance.saveError")}
             </p>
           )}
-          <DialogFooter className="gap-2 border-t border-slate-200 bg-card px-5 py-4 sm:justify-between">
+          <DialogFooter className="sticky bottom-0 gap-2 border-t border-slate-200 bg-card px-5 py-4 sm:justify-between">
             <Button
               type="button"
               size="sm"

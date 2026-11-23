@@ -1,7 +1,9 @@
+import type { AiModelCapabilities } from "./ai-model-capabilities";
 import type { TiptapDoc } from "./content";
 import type { AiAction, AiPromptParameterKind, AiPromptResultMode } from "./ai-assistant";
 import type { DiagramKind, DiagramSummaryPreview } from "./diagram";
 import type { TableSummaryPreview } from "./table";
+import type { TokenNotebookAccess, TokenNotebookAccessLevel } from "./schemas";
 
 export type NoteCreateKind = DiagramKind | "infographic" | "table" | "poster" | "encrypted";
 
@@ -196,6 +198,12 @@ export type AiModelConfig = {
   providerConfigId: string;
   modelId: string;
   displayName: string;
+  /** Model-level output budgets; `null` uses the EdgeEver default. Older servers omit these fields. */
+  generationMaxOutputTokens?: number | null;
+  tagSuggestionMaxOutputTokens?: number | null;
+  companionMaxOutputTokens?: number | null;
+  /** Limits detected from the provider (#652); `null` when never detected, absent on older servers. */
+  detectedCapabilities?: AiModelCapabilities | null;
 };
 
 export type AiProviderConfig = {
@@ -267,7 +275,15 @@ export type AiDiscoveredModel = {
 export type AiStreamEvent =
   | { type: "start" }
   | { type: "text-delta"; text: string }
-  | { type: "finish"; finishReason?: string; inputTokens?: number; outputTokens?: number }
+  /** The whole draft so far; replaces what earlier deltas built (a long run fixes up its parts). */
+  | { type: "text-reset"; text: string }
+  /** A long run moved on to part `part` (1-based) of `parts` (#652). */
+  | { type: "progress"; part: number; parts: number }
+  /**
+   * `truncated`: the provider stopped at its output or context limit, so the result is incomplete.
+   * `incompleteParts`: parts (1-based) of a long run that kept their source text.
+   */
+  | { type: "finish"; finishReason?: string; truncated?: boolean; incompleteParts?: number[]; inputTokens?: number; outputTokens?: number }
   | { type: "error"; code: string; message: string };
 
 export type AiTagSuggestion = {
@@ -284,6 +300,14 @@ export type ApiToken = {
   name: string;
   token: string | null;
   scopes: string[];
+  /**
+   * Per-notebook read/write grants. `null` (the default, and every token
+   * created before this field existed) means the token is not restricted to
+   * specific notebooks and keeps reaching the whole workspace.
+   */
+  notebookAccess: TokenNotebookAccess[] | null;
+  /** The single access level applied to the whole whitelist. */
+  notebookAccessLevel: TokenNotebookAccessLevel;
   lastUsedAt: string | null;
   expiresAt: string | null;
   isRevoked: boolean;
@@ -322,6 +346,50 @@ export type AuthSession = {
   sessionToken?: string;
   /** Server-side capabilities; absent on upstream servers. */
   features?: { encryptedNotes?: boolean; secretBlocks?: boolean };
+  /** Signed in with a recovery code: only TOTP rebinding is allowed until done. */
+  mfaRebindRequired?: boolean;
+};
+
+export type MfaMethod = "totp" | "recovery_code";
+
+/** `error.details` of a 401 `mfa_required` login response. */
+export type MfaChallenge = {
+  challengeToken: string;
+  expiresAt: string;
+  methods: MfaMethod[];
+};
+
+export type TotpStatus = {
+  enabled: boolean;
+  enabledAt: string | null;
+  recoveryCodesRemaining: number;
+  /** False when the deployment cannot encrypt secrets or runs as the demo. */
+  available: boolean;
+  unavailableReason: "encryption_unavailable" | "demo" | null;
+  /** The current session came from a recovery code and must rebind. */
+  rebindRequired: boolean;
+};
+
+export type TotpSetupResponse = {
+  /** Identifies this setup; `setup/verify` sends it back so a setup replaced by a newer one is refused. */
+  setupId: string;
+  secret: string;
+  otpauthUri: string;
+  issuer: string;
+  accountName: string;
+  expiresAt: string;
+};
+
+export type TotpRecoveryCodesResponse = {
+  /** Identifies this batch; the confirm step sends it back so only the codes the user saw are activated. */
+  batchId: string;
+  recoveryCodes: string[];
+};
+
+export type TotpConfirmResponse = {
+  ok: true;
+  /** Rotated session token after a restricted session finishes rebinding. */
+  sessionToken?: string;
 };
 
 export type LoginDeviceSession = {

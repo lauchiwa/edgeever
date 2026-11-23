@@ -167,12 +167,12 @@ describe("copy pipeline wiring", () => {
     expect(source).not.toContain("applyPublishLayout");
     expect(source).toContain("noteProseCodeFontSize");
     expect(source).toContain("NOTE_PROSE_HEADING_SCALE");
-    expect(source).toContain("NOTE_PROSE_PARAGRAPH_SPACING_PX");
+    expect(source).toContain('rhythm["--editor-paragraph-spacing"]');
     expect(source).toContain("[data-note-palette]");
     expect(source).toContain("preparePublishArticle");
     expect(source).not.toContain("editorThemeOverride");
     expect(source).toContain("ProseMirror-separator");
-    expect(source).toContain("findOriginalImage");
+    expect(source).toContain("loadPublishImage");
     expect(source).toContain("svgToWeChatImage");
     expect(source).toContain("rasterizePublishOrnamentsForWeChat");
     expect(source).toContain('fillStyle = "#ffffff"');

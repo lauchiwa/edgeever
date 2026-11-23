@@ -10,7 +10,6 @@ import {
   type AppLocalePreference,
   type SupportedLocale,
 } from "./locales";
-import { enUS } from "./resources/en-US";
 import { zhCN } from "./resources/zh-CN";
 
 export {
@@ -24,22 +23,36 @@ export {
 
 export const resources = {
   "zh-CN": { translation: zhCN },
-  "en-US": { translation: enUS },
 } as const;
 
 type OptionalLocale = Exclude<SupportedLocale, keyof typeof resources>;
 
 const isOptionalLocale = (locale: SupportedLocale): locale is OptionalLocale =>
-  locale === "ja" || locale === "pl" || locale === "ru";
+  locale !== "zh-CN";
 
 const loadOptionalCatalog = async (locale: OptionalLocale) => {
+  if (locale === "zh-TW") {
+    return (await import("./resources/zh-TW")).zhTW;
+  }
+  if (locale === "en-US") {
+    return (await import("./resources/en-US")).enUS;
+  }
   if (locale === "ja") {
     return (await import("./resources/ja")).ja;
   }
   if (locale === "pl") {
     return (await import("./resources/pl")).pl;
   }
-  return (await import("./resources/ru")).ru;
+  if (locale === "ru") {
+    return (await import("./resources/ru")).ru;
+  }
+  if (locale === "es") {
+    return (await import("./resources/es")).es;
+  }
+  if (locale === "de") {
+    return (await import("./resources/de")).de;
+  }
+  return (await import("./resources/fr")).fr;
 };
 
 const ensureLocaleCatalog = async (locale: SupportedLocale) => {
@@ -47,16 +60,22 @@ const ensureLocaleCatalog = async (locale: SupportedLocale) => {
     return;
   }
 
+  if (locale !== "en-US") {
+    await ensureLocaleCatalog("en-US");
+  }
   i18n.addResourceBundle(locale, "translation", await loadOptionalCatalog(locale), true, true);
 };
 
 void i18n.use(initReactI18next).init({
   resources,
-  lng: isOptionalLocale(getInitialLocale()) ? "en-US" : getInitialLocale(),
+  lng: isOptionalLocale(getInitialLocale()) ? defaultLocale : getInitialLocale(),
   fallbackLng: {
+    "zh-TW": ["zh-CN"],
     ja: ["en-US"],
     pl: ["en-US"],
     ru: ["en-US"],
+    es: ["en-US"],
+    de: ["en-US"],
     default: [defaultLocale],
   },
   supportedLngs: supportedLocales,

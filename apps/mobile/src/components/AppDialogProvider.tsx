@@ -81,7 +81,7 @@ export const AppDialogProvider = ({ children }: { children: ReactNode }) => {
               </View>
               <View style={styles.copy}>
                 <Text accessibilityRole="header" style={styles.title}>{request?.title ?? ""}</Text>
-                {request?.message ? <Text style={styles.description}>{request.message}</Text> : null}
+                {request?.message && <Text style={styles.description}>{request.message}</Text>}
               </View>
             </View>
             <View style={styles.footer}>

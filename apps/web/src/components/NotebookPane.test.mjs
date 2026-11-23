@@ -6,6 +6,8 @@ const source = readFileSync(new URL("./NotebookPane.tsx", import.meta.url), "utf
 test("keeps proactive AI out of primary navigation", () => {
   const primaryNav = source.split('aria-label={t("notebookPane.entries")}>')[1]?.split("</nav>")[0];
   expect(primaryNav).toContain('label={t("notebookPane.allMemos")}');
+  expect(primaryNav).toContain('__EDGEEVER_DEVELOPMENT_PROFILE__ === "local"');
+  expect(primaryNav).toContain('t("demo.resetButton")');
   expect(primaryNav).not.toContain('label={t("companion.navTitle")}');
   expect(primaryNav).not.toContain("onClick={onOpenCompanion}");
 });
@@ -13,10 +15,10 @@ test("keeps proactive AI out of primary navigation", () => {
 test("keeps the desktop create-note control compact with one neutral outline", () => {
   const css = readFileSync(new URL("../styles/globals.css", import.meta.url), "utf8");
 
-  expect(source).toContain('rounded-2xl border border-slate-200/90');
-  expect(source).toContain('className="group flex h-12 max-w-[calc(100%-2.25rem)]');
-  expect(source).toContain('className="group relative flex h-12 min-w-9 flex-1');
-  expect(source).toContain('before:inset-y-2.5');
+  expect(source).toContain('rounded-xl border border-slate-200/90');
+  expect(source).toContain('className="group flex h-10 max-w-[calc(100%-2.25rem)]');
+  expect(source).toContain('className="group relative flex h-10 min-w-9 flex-1');
+  expect(source).toContain('before:inset-y-2');
   expect(source).toContain('data-[state=open]:bg-workspace-selection data-[state=open]:text-slate-950');
   expect(source).toContain('t("diagram.moreTypes")');
   expect(source).toContain('group-data-[state=open]:rotate-180');
@@ -27,25 +29,26 @@ test("keeps the desktop create-note control compact with one neutral outline", (
   expect(source).not.toContain('title={t("notebookPane.newMemo")}');
 });
 
-test("keeps the desktop sync status bar and sidebar chrome compact without shrinking primary controls", () => {
+test("keeps the desktop sync status bar and sidebar chrome compact and folds template creation into the more-types menu", () => {
   const syncBar = source.split("const SyncStatusBar")[1]?.split("export const NotebookPane")[0];
 
-  expect(syncBar).toContain("flex h-8 items-center gap-2 rounded-md border px-3");
+  expect(syncBar).toContain("h-6 border-transparent bg-transparent px-1.5 text-slate-500");
+  expect(syncBar).toContain("flex items-center gap-1.5 rounded-md border transition-all duration-200");
   expect(syncBar).not.toContain("min-h-10");
   expect(syncBar).not.toContain("py-2");
   expect(syncBar).not.toContain("mb-3");
-  expect(source).toContain('className="px-3 pt-1.5"');
-  expect(source).toContain('className="hidden shrink-0 px-3 pb-2 pt-2 lg:block"');
-  expect(source).toContain('className="group flex h-12 max-w-[calc(100%-2.25rem)]');
-  expect(source).toContain("mb-1 hidden h-8 w-full items-center justify-start gap-2");
+  expect(source).toContain('className="px-3 pt-1"');
+  expect(source).toContain('className="hidden shrink-0 px-3 pb-1.5 pt-1 lg:block"');
+  expect(source).toContain('className="group flex h-10 max-w-[calc(100%-2.25rem)]');
   expect(source).toContain('className="mb-1 space-y-1"');
+  expect(source).not.toContain("mb-1 hidden h-8 w-full items-center justify-start gap-2");
   expect(source).not.toContain("mb-3 hidden h-8 w-full");
   expect(source).not.toContain('className="mb-3 space-y-1"');
   expect(source).not.toContain("mb-2 hidden h-8 w-full");
   expect(source).not.toContain('className="mb-2 space-y-1"');
 });
 
-test("lists diagram note types in the create menu without beta badges", () => {
+test("lists diagram note types and template entry in the create menu without diagram beta badges", () => {
   const createTypeMenu = source.split("const CreateMemoTypeItems")[1]?.split("const getSyncStatusLabel")[0];
   const diagramSection = createTypeMenu?.split('onCreateMemo("infographic")')[0];
 
@@ -54,6 +57,7 @@ test("lists diagram note types in the create menu without beta badges", () => {
   expect(createTypeMenu).toContain('onCreateMemo("flowchart")');
   expect(createTypeMenu).toContain('onCreateMemo("architecture")');
   expect(createTypeMenu).toContain('onCreateMemo("table")');
+  expect(createTypeMenu).toContain('t("templates.useTemplate")');
   expect(diagramSection).not.toContain("DiagramBetaBadge");
   expect(diagramSection).not.toContain("Beta");
   expect(createTypeMenu).toContain("Beta");
@@ -135,15 +139,13 @@ describe("NotebookPane tree expansion persistence", () => {
 });
 
 describe("NotebookPane client downloads", () => {
-  test("keeps macOS, Windows, and Linux downloads visible in the desktop runtime", () => {
-    expect(source).toContain('t("pwa.sidebarMac") || "macOS"');
-    expect(source).toContain('t("pwa.sidebarWindows") || "Windows"');
-    expect(source).toContain('t("pwa.sidebarLinux") || "Linux"');
-    expect(source).not.toContain("!window.edgeeverDesktop?.isAvailable");
+  const downloads = readFileSync(new URL("./ClientDownloadLinks.tsx", import.meta.url), "utf8");
+  test("keeps sidebar downloads on the web and hides them in the desktop runtime", () => {
+    expect(source).toContain("!window.edgeeverDesktop?.isAvailable && (");
+    expect(source).toContain("<ClientDownloadLinks />");
   });
 
   test("labels Windows and Linux by package format instead of a preview badge", () => {
-    const downloads = source.split('pwa.sidebarDownloadsTitle')[1]?.split("</DropdownMenu>")[0];
 
     expect(downloads).toContain(">AppImage</span>");
     expect(downloads).toContain(">EXE</span>");
@@ -157,13 +159,13 @@ describe("NotebookPane client downloads", () => {
   });
 
   test("renders platform icons inline so desktop protocols do not break them", () => {
-    expect(source).toContain("<BrandIcon path={APPLE_ICON_PATH}");
-    expect(source).toContain("<BrandIcon path={WINDOWS_ICON_PATH}");
-    expect(source).toContain('<BrandIcon path={LINUX_ICON_PATH} className="h-4 w-4"');
-    expect(source).toContain("<GooglePlayIcon />");
-    expect(source).toContain("<AppStoreIcon />");
-    expect(source).toContain("<ChromeIcon />");
-    expect(source).not.toContain('src="/icons/platforms/');
+    expect(downloads).toContain("<BrandIcon path={APPLE_ICON_PATH}");
+    expect(downloads).toContain("<BrandIcon path={WINDOWS_ICON_PATH}");
+    expect(downloads).toContain('<BrandIcon path={LINUX_ICON_PATH} className="h-4 w-4"');
+    expect(downloads).toContain("<GooglePlayIcon />");
+    expect(downloads).toContain("<AppStoreIcon />");
+    expect(downloads).toContain("<ChromeIcon />");
+    expect(downloads).not.toContain('src="/icons/platforms/');
   });
 });
 

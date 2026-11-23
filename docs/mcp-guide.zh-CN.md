@@ -1,0 +1,113 @@
+# 在 MCP 客户端与 AI Agent 中使用 EdgeEver
+
+[English](mcp-guide.md)
+
+## 1. 连接客户端
+
+在 **个人中心** → **API / MCP** 中为每个客户端单独创建 Token，然后点击 **复制 MCP 配置**。搜索和总结选 **只读访问**，需要新建或修改笔记时选 **完全访问**。如果 Token 泄露，在这里删除它并创建新的 Token。
+
+### 限制 Token 到特定笔记本
+
+选择 **自定义访问** 可保留全局完全权限，但将 Token 限制到一个笔记本白名单。勾选某本笔记本即同时开放其全部子笔记本（子本显示为继承）；需要缩小范围时，取消父本、单独勾选要开放的子本即可。白名单只有 **只读** / **读写** 一个级别，作用于整个白名单。未勾选的笔记本（包括之后新建的）对 Token 不可见；空白名单即无任何访问权限。已创建的 Token 可随时通过 **编辑 Token** 更改白名单与级别——Token 本身不变，新权限对下一次请求立即生效。创建表单默认选择 **完全访问**，可访问整个工作区。选择 **只读** 可授予整个工作区的读取权限，选择 **自定义访问** 可指定笔记本；自定义访问初始白名单为空，勾选前无笔记本访问权限。
+
+在笔记本白名单上线之前创建的 Token 不受限制，按原有方式继续使用。两个全工作区级操作不对受限 Token 开放：清空回收站、全工作区同步/备份导出。笔记模板与 AI 指令是无所属笔记本的工作区级资源，受限 Token 同样不可访问。
+
+远程客户端通过 Streamable HTTP 连接。使用实例地址加 `/mcp`，例如 `https://notes.example.com/mcp`，并发送 `Authorization: Bearer <token>`。请确认复制的地址指向你的 EdgeEver 实例。
+
+### Cursor 等支持 `mcpServers` 的客户端
+
+将 **复制 MCP 配置** 得到的 JSON 粘贴到客户端的 MCP 设置中。下面是 `mcpServers` 示例。请把真实 Token 留在本地，避免提交到仓库。
+
+```json
+{
+  "mcpServers": {
+    "edgeever": {
+      "url": "https://notes.example.com/mcp",
+      "headers": { "Authorization": "Bearer <token>" }
+    }
+  }
+}
+```
+
+### Claude Code
+
+```bash
+claude mcp add --scope user --transport http edgeever https://notes.example.com/mcp \
+  --header "Authorization: Bearer <token>"
+claude mcp get edgeever   # 应显示 "Connected"
+```
+
+省略 `--scope user` 可将配置限制在当前项目。
+
+### VS Code
+
+在 `.vscode/mcp.json` 或用户级 `mcp.json` 中使用 `servers` 和 `type: "http"`。以下示例会提示输入 Token，也可以改用环境变量 `${env:EDGEEVER_TOKEN}`。
+
+```json
+{
+  "inputs": [
+    {
+      "type": "promptString",
+      "id": "edgeever-token",
+      "description": "EdgeEver API Token",
+      "password": true
+    }
+  ],
+  "servers": {
+    "edgeever": {
+      "type": "http",
+      "url": "https://notes.example.com/mcp",
+      "headers": { "Authorization": "Bearer ${input:edgeever-token}" }
+    }
+  }
+}
+```
+
+### 仅支持 stdio 的客户端
+
+安装 Bun，在仓库根目录保存连接配置，再让客户端启动桥接脚本。将示例路径替换为脚本的实际绝对路径。
+
+```bash
+# 一次性：在 ~/.edgeever/config.json 中保存配置
+bun run cli -- profile set personal --url https://notes.example.com --token "<token>"
+
+# 在客户端中运行：
+bun /path/to/edgeever/scripts/edgeever-mcp-stdio.mjs --profile personal
+```
+
+也可以用 `EDGEEVER_URL` 和 `EDGEEVER_TOKEN` 环境变量代替 `--profile`。只支持 OAuth 的连接器无法直接连接。如果客户端能启动本地命令，可使用此桥接。
+
+## 2. 验证连接
+
+让 Agent 调用 `get_current_user`，核对返回的账号、工作区和 Token 权限。再让它调用 `list_notebooks`，确认能读取笔记本。
+
+可以在客户端自定义指令、`AGENTS.md` 或 `CLAUDE.md` 中加一条规则。例如「新笔记放进『Agent 笔记』，先搜索同主题笔记。删除或合并前先征得我的同意。」
+
+使用 `get_memo` 读取普通笔记，或在 `list_memos` 中设置 `includeContent: true` 获取全文时，响应会提供笔记元数据和一份 `contentMarkdown` 正文。已有集成如果读取 `contentJson` 或 `contentText`，请传入 `format: "all"` 以保留原有响应。
+
+使用 `search_memos` 进行关键词搜索时，如果能在正文中定位查询词或其中的词项，结果还会包含最多 200 个字符的 `snippet` 命中片段，并保留原有 `excerpt` 摘要。无法定位正文命中的结果（包括仅标题或标签命中）沿用现有摘要。如果答案涉及片段外的上下文，请继续读取笔记全文。
+
+## 3. 上传本地文件
+
+`upload_memo_image` 和 `upload_memo_attachment` 需要在工具调用中以 base64 传入文件，只适合很小的文件。如果 Agent 可以执行命令行，请先上传文件，再用它创建或更新笔记：
+
+1. 调用 `create_resource_upload_url`，传入 `kind`（`image` 或 `attachment`）、`mimeType` 和准确的 `byteSize`，可选传入 `filename` 和 `label`（图片替代文本或链接文字）。无需事先创建笔记。
+2. 将返回的 `curl` 命令中的 `<path-to-file>` 替换为文件路径后执行。该命令以 `PUT` 将文件发送到 `/api/public/resource-uploads`，并在 `Authorization` 请求头中携带专用的上传 Token。命令中不会出现 MCP Token。`201` 响应包含 `resourceId`、需要登录访问的 `url`，以及可插入的 `markdownImage` 或 `markdownLink`。
+3. 调用 `create_memo`，在 `contentMarkdown` 中放入该 Markdown，并在 `resourceIds` 中传入资源 ID。笔记与文件一并保存；调用失败时不会保存任何内容，文件仍可用于重试。已有笔记可将 `resourceIds` 传给 `update_memo`。
+
+每个 URL 只接受一个与声明大小和类型完全一致的文件，最大 100 MiB，有效期 15 分钟。大小或类型不符的请求会被拒绝，但不会消耗该 URL；重复一次已成功的上传会返回相同的 `resourceId`。创建它的 Token 被撤销或失去 `write:resources` 权限后，URL 也随之失效。上传后 24 小时内未绑定到笔记的文件会被删除。每个工作区最多同时保留 20 个未使用的 URL 和 100 个未绑定文件（共 1 GiB）。绑定文件需要 `write:resources` 权限。
+
+## 4. 排障
+
+| 现象 | 原因与处理 |
+|---|---|
+| `401`，提示 "Authentication required" | 客户端没有发送凭据。检查是否设置了 `Authorization` 请求头，包括请求头名称和 `Bearer ` 前缀。 |
+| `401`，且 `WWW-Authenticate` 响应头包含 `error="invalid_token"` | Token 已发送但被拒绝。确认它属于当前实例；如果已被删除或替换，创建新 Token 并更新客户端。 |
+| `403` "Origin is not allowed" | 基于浏览器的客户端发送了外部 `Origin`。请在浏览器外运行客户端，或使用 stdio 桥接。 |
+| 客户端报告 JSON 无效或收到 HTML 页面 | URL 没有指向服务器上的 `/mcp`（例如拼写错误、`//mcp` 或桌面应用地址）。 |
+| 修改数据的工具被拒绝 | Token 为只读。确实需要写入时，再为该客户端创建 **完全访问** Token。 |
+| 上传 URL 返回 `410` | 该 URL 已用于其他文件或已过期。请重新调用 `create_resource_upload_url`。 |
+| 上传 URL 返回 `400` 或 `415` | 文件与声明的 `byteSize` 或 `mimeType` 不符。用 `wc -c` 核对大小后重新发送同一文件。 |
+| `create_memo` 提示资源不是待绑定的上传 | ID 有误、已被绑定，或文件未在 24 小时内绑定。请重新上传。 |
+
+较旧的实例可能对缺少凭据和 Token 被拒绝返回相同的通用 `401`。先核对实例地址、请求头和 Token。

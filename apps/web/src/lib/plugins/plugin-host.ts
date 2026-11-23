@@ -34,7 +34,7 @@ import {
   type ThemeTokenName,
   type ThemeTokens,
 } from "@edgeever/plugin-api";
-import { markdownToDoc, type MemoDetail } from "@edgeever/shared";
+import { markdownToDoc, projectLegacyTableDocument, type MemoDetail } from "@edgeever/shared";
 import {
   structuredEditToken, pluginNoteKind, assertPluginMarkdownNote, assertStructuredRevision, pluginDiagram, pluginTable,
   translateStructuredError, applyDiagramOperations, applyTableOperations, diagramSemanticGraph,
@@ -53,7 +53,7 @@ import {
   toWorkspaceExtensionUpsert,
   type PluginCatalogAdapter,
 } from "@/lib/plugins/plugin-catalog-sync";
-import { loadResolvedPluginMarketplace } from "@/lib/plugins/plugin-marketplace";
+import { loadPluginMarketplace } from "@/lib/plugins/plugin-marketplace";
 import { hasAcknowledgedPluginTrustWarning } from "@/lib/plugins/plugin-trust";
 import { subscribeRepositoryMutations, type RepositoryMutationEvent } from "@/lib/repository-events";
 import type { WorkspaceExtension } from "@edgeever/shared";
@@ -195,6 +195,7 @@ export interface PluginScheduleAdapter {
 }
 
 export interface PluginHostSnapshot {
+  catalogErrors: { extensionId: string | null; message: string }[];
   extensions: InstalledExtension[];
   commands: RegisteredPluginCommand[];
   panels: RegisteredPluginPanel[];
@@ -449,6 +450,7 @@ export class EdgeEverPluginHost {
   private readonly scheduleAdapter?: PluginScheduleAdapter;
   private readonly catalogAdapter?: PluginCatalogAdapter;
   private catalogSyncSuspended = 0;
+  private catalogErrors: PluginHostSnapshot["catalogErrors"] = [];
   private readonly listeners = new Set<() => void>();
   private readonly activePlugins = new Map<string, ActivePlugin>();
   private readonly commands = new Map<string, PluginCommand & { pluginId: string }>();
@@ -459,7 +461,7 @@ export class EdgeEverPluginHost {
   private readonly eventListeners = new Map<keyof PluginEventMap, Set<{ pluginId: string; listener: (payload: never) => void }>>();
   private extensions = readInstalledExtensions();
   private activeThemeId = readStorageItem(ACTIVE_THEME_STORAGE_KEY);
-  private snapshot: PluginHostSnapshot = { extensions: [], commands: [], panels: [], embeds: [], activeThemeId: null };
+  private snapshot: PluginHostSnapshot = { catalogErrors: [], extensions: [], commands: [], panels: [], embeds: [], activeThemeId: null };
   private editorAdapter: PluginEditorAdapter | null = null;
   private navigationAdapter: PluginNavigationAdapter | null = null;
   private panelAdapter: PluginPanelAdapter | null = null;
@@ -540,13 +542,18 @@ export class EdgeEverPluginHost {
     try {
       remote = await this.catalogAdapter.list();
     } catch (error) {
+      this.catalogErrors = [{ extensionId: null, message: error instanceof Error ? error.message : String(error) }];
+      this.refreshSnapshot();
       console.error("Workspace extension catalog sync failed.", error);
       return [];
     }
 
+    this.catalogErrors = [];
     let officialIds = new Set<string>();
     try {
-      const marketplace = await loadResolvedPluginMarketplace();
+      // Reconciliation only needs the bundled publisher/id trust list, not
+      // a new GitHub release lookup and package download for every focus.
+      const marketplace = await loadPluginMarketplace();
       officialIds = new Set(
         marketplace.entries.filter((entry) => entry.publisher === "edgeever").map((entry) => entry.id),
       );
@@ -589,12 +596,15 @@ export class EdgeEverPluginHost {
           const extension = this.extensions.find((item) => item.manifest.id === action.extensionId);
           if (extension) await this.pushCatalog(extension, { ignoreSuspend: true });
         } catch (error) {
+          const extensionId = action.type === "install" ? action.entry.extensionId : action.extensionId;
+          this.catalogErrors.push({ extensionId, message: error instanceof Error ? error.message : String(error) });
           if (action.type === "install") failed.add(action.entry.extensionId);
           console.error("Workspace extension catalog sync failed.", error);
         }
       }
     } finally {
       this.catalogSyncSuspended -= 1;
+      this.refreshSnapshot();
     }
     return pendingTrustPluginIds;
   }
@@ -1316,7 +1326,7 @@ export class EdgeEverPluginHost {
         get: async (noteId) => {
           assertPermission(manifest, "notes:read");
           const current = (await this.repository.getMemo(noteId)).memo;
-          return { note: toPluginNote(current), table: pluginTable(current), editToken: await structuredEditToken(current) };
+          return { note: toPluginNote(current), table: projectLegacyTableDocument(pluginTable(current)), editToken: await structuredEditToken(current) };
         },
         edit: async (noteId, input) => this.withNoteWrite(noteId, async () => {
           assertPermission(manifest, "notes:read"); assertPermission(manifest, "notes:write");
@@ -1333,7 +1343,7 @@ export class EdgeEverPluginHost {
             });
             if (!input.dryRun && mutation.changedCellCount > 0 && input.allowDataChanges !== true) throw structuredApiError("TABLE_DATA_CHANGES_REQUIRED", "Schema changes affect populated cells. Preview with dryRun, then set allowDataChanges=true.");
             const note = input.dryRun === true ? current : await persistStructured(current, serializeTableDocument(mutation.document), markdownToDoc(tableFallbackMarkdown(mutation.document)));
-            return { note: toPluginNote(note), table: mutation.document, editToken: await structuredEditToken(note), dryRun: input.dryRun === true, changedCellCount: mutation.changedCellCount, removedAttachmentCount: mutation.removedAttachmentCount };
+            return { note: toPluginNote(note), table: projectLegacyTableDocument(mutation.document), editToken: await structuredEditToken(note), dryRun: input.dryRun === true, changedCellCount: mutation.changedCellCount, removedAttachmentCount: mutation.removedAttachmentCount };
           } catch (error) { return translateStructuredError(error); }
         }),
       },
@@ -1875,6 +1885,7 @@ export class EdgeEverPluginHost {
 
   private refreshSnapshot() {
     this.snapshot = {
+      catalogErrors: this.catalogErrors.map((item) => ({ ...item })),
       extensions: this.extensions.map((item) => ({ ...item, manifest: { ...item.manifest } })),
       commands: [...this.commands.values()].map(({ pluginId, id, title, listed, menu }) => ({
         pluginId,

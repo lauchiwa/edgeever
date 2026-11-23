@@ -4,6 +4,9 @@ import {
   NOTE_PROSE_PALETTES,
   NOTE_PROSE_PALETTE_CHOICES,
   NOTE_PROSE_DARK_ACCENTS,
+  NOTE_PROSE_HEADING_STYLES,
+  NOTE_PROSE_QUOTE_STYLES,
+  NOTE_PROSE_EMPHASIS_STYLES,
   accountNoteProseFromRow,
   publicNoteProseFromAccount,
   noteProseCssVariables,
@@ -12,6 +15,9 @@ import {
   noteProseMigrationPatch,
   paletteForLegacyEditorTheme,
   parseNoteProsePalette,
+  parseNoteProseHeadingStyle,
+  parseNoteProseQuoteStyle,
+  parseNoteProseEmphasisStyle,
   resolveNoteProse,
   DEFAULT_NOTE_PROSE_CSS,
   noteProseCssDropsDeclarations,
@@ -56,7 +62,7 @@ describe("note prose", () => {
     for (const [id, colors] of Object.entries(NOTE_PROSE_PALETTES)) {
       for (const background of ["#FFFFFF", "#F8FAFB"]) {
         // Bright emphasis is intentional; links and code retain normal-text AA.
-        const minimumAccentContrast = id === "teal" ? 2.5 : id === "clay" ? 3 : 4.5;
+        const minimumAccentContrast = id === "teal" ? 2.5 : id === "clay" || id === "emerald" ? 3 : 4.5;
         expect(contrast(colors.accent, background)).toBeGreaterThanOrEqual(minimumAccentContrast);
         for (const foreground of [colors.link, colors.codeText]) {
           expect(contrast(foreground, background)).toBeGreaterThanOrEqual(4.5);
@@ -73,6 +79,20 @@ describe("note prose", () => {
       .not.toHaveProperty("--note-palette-dark-accent");
   });
 
+  test("keeps rose independent of pink through account and public preferences", () => {
+    expect(NOTE_PROSE_PALETTE_CHOICES).toContain("pink");
+    expect(NOTE_PROSE_PALETTE_CHOICES).toContain("rose");
+    for (const palette of ["pink", "rose"]) {
+      const account = accountNoteProseFromRow({ note_prose_palette: palette });
+      expect(account.palette).toBe(palette);
+      expect(resolveNoteProse(account).palette).toBe(palette);
+      expect(publicNoteProseFromAccount(account).palette).toBe(palette);
+      expect(NoteProseUpdateSchema.parse({ palette }).palette).toBe(palette);
+    }
+    expect(NOTE_PROSE_PALETTES.pink.accent).toBe("#BB456E");
+    expect(NOTE_PROSE_DARK_ACCENTS.pink).toBe("#E794B0");
+  });
+
   test("maps retired editor themes onto color names and leaves the native theme unset", () => {
     expect(paletteForLegacyEditorTheme("stance")).toBe("clay");
     expect(paletteForLegacyEditorTheme("stub")).toBe("dawn");
@@ -82,12 +102,22 @@ describe("note prose", () => {
     expect(paletteForLegacyEditorTheme("outline-emerald")).toBeNull();
     expect(paletteForLegacyEditorTheme("wechat-green")).toBeNull();
     expect(paletteForLegacyEditorTheme("modern-mint")).toBeNull();
-    expect(parseNoteProsePalette("emerald")).toBe("native");
+    expect(parseNoteProsePalette("emerald")).toBe("emerald");
+    expect(NoteProseUpdateSchema.safeParse({ palette: "emerald" }).success).toBe(true);
     expect(parseNoteProsePalette("green")).toBe("native");
     expect(NoteProseUpdateSchema.safeParse({ palette: "green" }).success).toBe(false);
     expect(parseNoteProsePalette("plum")).toBe("native");
     expect(NoteProseUpdateSchema.safeParse({ palette: "plum" }).success).toBe(false);
-    expect(resolveNoteProse({ palette: "emerald" }).palette).toBe("native");
+    expect(resolveNoteProse({ palette: "emerald" }).palette).toBe("emerald");
+    expect(NOTE_PROSE_HEADING_STYLES).toEqual(["default", "bar", "numbered"]);
+    expect(NOTE_PROSE_QUOTE_STYLES).toEqual(["default", "dashed", "accent-bar", "minimal-rule"]);
+    expect(NOTE_PROSE_EMPHASIS_STYLES).toEqual(["default", "marker"]);
+    expect(parseNoteProseHeadingStyle("numbered")).toBe("numbered");
+    expect(parseNoteProseHeadingStyle("unknown")).toBeNull();
+    expect(parseNoteProseQuoteStyle("dashed")).toBe("dashed");
+    expect(parseNoteProseQuoteStyle("unknown")).toBeNull();
+    expect(parseNoteProseEmphasisStyle("marker")).toBe("marker");
+    expect(parseNoteProseEmphasisStyle("unknown")).toBeNull();
     expect(paletteForLegacyEditorTheme("brief")).toBe("teal");
     expect(paletteForLegacyEditorTheme("zen")).toBe("teal");
     expect(paletteForLegacyEditorTheme("guide")).toBe("azure");

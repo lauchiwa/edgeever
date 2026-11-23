@@ -22,6 +22,12 @@ export default defineConfig({
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
     },
+    {
+      name: "webkit",
+      // Focus Safari coverage on appearance and read-only share interactions.
+      testMatch: ["notebook-appearance.spec.ts", "public-share-outline.spec.ts"],
+      use: { ...devices["Desktop Safari"] },
+    },
   ],
   webServer: {
     command: "bun run dev",

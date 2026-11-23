@@ -68,6 +68,7 @@ contextBridge.exposeInMainWorld("edgeeverDesktop", Object.freeze({
   testPicGoConnection: (input) => ipcRenderer.invoke("desktop:picgo-test", input),
   uploadPicGoImage: (input) => ipcRenderer.invoke("desktop:picgo-upload", input),
   testImgBedConnection: (input) => ipcRenderer.invoke("desktop:imgbed-test", input),
+  listImgBedChannels: (input) => ipcRenderer.invoke("desktop:imgbed-channels", input),
   uploadImgBedImage: (input) => ipcRenderer.invoke("desktop:imgbed-upload", input),
   publicNetworkFetch: (requestId, input) => ipcRenderer.invoke("desktop:public-network-fetch", requestId, input),
   cancelPublicNetworkFetch: async (requestId) => { ipcRenderer.send("desktop:cancel-public-network-fetch", requestId); },
@@ -83,6 +84,8 @@ contextBridge.exposeInMainWorld("edgeeverDesktop", Object.freeze({
   probeAcpAdapter: (input) => ipcRenderer.invoke("desktop:acp-probe", input),
   installAcpAdapter: (id) => ipcRenderer.invoke("desktop:acp-install", id),
   authenticateAcpAdapter: (input) => ipcRenderer.invoke("desktop:acp-authenticate", input),
+  cancelAcpAuthentication: (id) => ipcRenderer.invoke("desktop:acp-cancel-auth", id),
+  reopenAcpLoginPage: (id) => ipcRenderer.invoke("desktop:acp-reopen-login", id),
   prepareAcp: (input) => ipcRenderer.invoke("desktop:acp-prepare", input),
   promptAcp: (input) => ipcRenderer.invoke("desktop:acp-prompt", input),
   cancelAcp: (requestId) => ipcRenderer.invoke("desktop:acp-cancel", requestId),
@@ -105,6 +108,21 @@ contextBridge.exposeInMainWorld("edgeeverDesktop", Object.freeze({
     return () => ipcRenderer.removeListener("desktop:update-status-changed", listener);
   },
   sidecarRequest: (method, params = {}) => ipcRenderer.invoke("desktop:sidecar-request", method, params),
+  openAttachment: (input) => {
+    if (!navigator.userActivation?.isActive) return Promise.resolve({ ok: false, code: "forbidden" });
+    return ipcRenderer.invoke("desktop:open-attachment", input);
+  },
+  attachmentWritebacks: () => ipcRenderer.invoke("desktop:attachment-writebacks"),
+  retryAttachmentWriteback: (id) => ipcRenderer.invoke("desktop:retry-attachment-writeback", id),
+  revealAttachmentWriteback: (id) => {
+    if (!navigator.userActivation?.isActive) return Promise.resolve();
+    return ipcRenderer.invoke("desktop:reveal-attachment-writeback", id);
+  },
+  onAttachmentResourceSaved: (callback) => {
+    const listener = (_event, resource) => callback(resource);
+    ipcRenderer.on("desktop:attachment-resource-saved", listener);
+    return () => ipcRenderer.removeListener("desktop:attachment-resource-saved", listener);
+  },
   beginStagedResource: (input) => ipcRenderer.invoke("desktop:stage-resource-begin", input),
   appendStagedResource: (id, bytes) => ipcRenderer.invoke("desktop:stage-resource-append", id, bytes),
   completeStagedResource: (id) => ipcRenderer.invoke("desktop:stage-resource-complete", id),

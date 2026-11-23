@@ -1,5 +1,5 @@
 export const plSiteTagline =
-  "Natywna dla AI baza wiedzy oraz alternatywa dla Evernote/Obsidian z błyskawiczną synchronizacją i natywnym MCP. Bezpłatnie na Cloudflare lub self-hosted przez Docker.";
+  "Natywna dla AI aplikacja do notatek oraz alternatywa dla Evernote/Obsidian z błyskawiczną synchronizacją i natywnym MCP. Bezpłatnie na Cloudflare lub self-hosted przez Docker.";
 
 export const plSiteCopy = {
   layout: {
@@ -18,6 +18,7 @@ export const plSiteCopy = {
     dockerDeploy: "Docker",
     selfHostedAlternative: "Alternatywa dla Evernote",
     migration: "Migracja z Evernote",
+    noteMigration: "Przewodnik migracji",
     evernoteMigration: "Migracja z Evernote",
     memosMigration: "Migracja z Memos",
     notionMigration: "Migracja z Notion",
@@ -46,6 +47,8 @@ export const plSiteCopy = {
     clipper: "Web Clipper",
     windows: "Windows",
     linux: "Linux",
+    migrationTitle: "Migracja notatek",
+    migrationSubtitle: "Natywny import z Evernote, Obsidian, Joplin oraz migracja z Notion i flomo",
     imageAlt: "Podgląd EdgeEver",
     badgeText:
       "💡 Wszystkie platformy: macOS, Windows, Linux, iOS, Android, Web Clipper · Natywna współpraca z MCP i ACP · Darmowy plan Cloudflare i Docker",
@@ -55,7 +58,7 @@ export const plSiteCopy = {
     heading: "Zbudowany od nowa z myślą o samodzielnym hostingu wiedzy i pracy z AI",
     subheading:
       "Bez reklam, limitów urządzeń i drogich subskrypcji. Każdy szczegół służy szybkiemu, otwartemu i prywatnemu „drugiemu mózgowi”.",
-    showcaseCta: "Zobacz 19 praktycznych scenariuszy i zrzutów ekranu",
+    showcaseCta: "Zobacz 20 praktycznych scenariuszy i zrzutów ekranu",
     card1: {
       badge: "Klasyczny interfejs",
       title: "Klasyczny układ trzech paneli – szybszy i lżejszy",
@@ -115,8 +118,8 @@ export const plSiteCopy = {
     },
   },
   marquee: {
-    title: "Aplikacje na wszystkie platformy, elastyczne wdrożenie i współpraca z AI",
-    subtitle: "Od macOS i natywnych aplikacji iOS i Android, przez samodzielny hosting w Dockerze i kopiowanie ze stylami, po współpracę przez Remote MCP.",
+    title: "Natywna architektura, elastyczny hosting i ekosystem AI",
+    subtitle: "Od lokalnej synchronizacji SQLite i integracji ACP / Remote MCP po hosting Docker oraz formatowanie treści.",
     items: [
       {
         tag: "macOS Desktop",
@@ -267,13 +270,13 @@ export const plSiteCopy = {
         cta: "Przeczytaj poradnik wdrożenia",
       },
       {
-        title: "Migracja z Evernote",
-        summary: "Użyj EdgeEver MCP, evernote-backup i skryptu importu ENEX, aby przenieść starą bibliotekę notatek do własnej instancji.",
-        href: "/blog/evernote-migration-guide",
+        title: "Migracja z innych aplikacji",
+        summary: "Natywny import z Evernote, Obsidian i Joplin jednym kliknięciem lub migracja z Notion, flomo i Memos za pomocą AI Agent (MCP).",
+        href: "/blog/note-migration-guide",
         cta: "Przeczytaj poradnik migracji",
       },
       {
-        title: "19 praktycznych scenariuszy",
+        title: "20 praktycznych scenariuszy",
         summary: "Wizualny przegląd pisania w trzech panelach, wycinania treści, diagramów i tabel AI, lokalnych agentów ACP i plakatów.",
         href: "/guides/best-practices",
         cta: "Zobacz przykłady",

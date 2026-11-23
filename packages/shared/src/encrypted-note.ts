@@ -70,8 +70,9 @@ export const encryptedNotePlaceholderDoc = (): TiptapDoc => ({
   content: [{ type: "paragraph", content: [{ type: "text", text: ENCRYPTED_NOTE_PLACEHOLDER_TEXT }] }],
 });
 
+export const ENCRYPTED_NOTE_MARKER_PREFIX = `<!-- ${MARKER}:`;
 export const hasEncryptedNoteMarker = (markdown: string | null | undefined) =>
-  Boolean(markdown?.includes(`<!-- ${MARKER}:`));
+  Boolean(markdown?.includes(ENCRYPTED_NOTE_MARKER_PREFIX));
 
 export const parseEncryptedNoteEnvelope = (
   markdown: string | null | undefined,

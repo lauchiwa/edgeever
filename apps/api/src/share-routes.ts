@@ -9,6 +9,7 @@ import { isEncryptedNoteMarkdown } from "./encrypted-note-guard";
 import { redactSecretBlockDoc, redactSecretBlockMarkdown } from "./secret-block-guard";
 import { createId, isoNow, parseJsonArray } from "./entity-utils";
 import { apiError, notFound } from "./http-errors";
+import { isMemoShareExpired, recordMemoShareView } from "./memo-share-access";
 import { resolveObjectStorage } from "./object-storage";
 import { getAuditActor, getWorkspaceId, requireUser } from "./request-auth";
 import { setResourceContentHeaders } from "./resource-service";
@@ -33,6 +34,9 @@ type MemoShareRow = {
   password_hash: string | null;
   show_updated_at?: number | null;
   show_branding?: number | null;
+  expires_at?: string | null;
+  view_count?: number | null;
+  last_viewed_at?: string | null;
 };
 type ManagedMemoShareRow = MemoShareRow & {
   title: string | null;
@@ -47,6 +51,7 @@ type PublicMemoShareRow = {
   tags_json: string;
   updated_at: string;
   password_hash: string | null;
+  expires_at: string | null;
   show_updated_at?: number | null;
   show_branding?: number | null;
   note_body_font: string | null;
@@ -54,6 +59,7 @@ type PublicMemoShareRow = {
 type ShareGateRow = {
   workspace_id: string;
   password_hash: string | null;
+  expires_at: string | null;
   unlock_failed_count: number;
   unlock_window_started_at: string | null;
   unlock_blocked_until: string | null;
@@ -68,8 +74,8 @@ type SharedResourceRow = {
   byte_size: number;
   workspace_id: string;
   password_hash: string | null;
-  /** Null when the memo has no content row; such a memo cannot be an encrypted note. */
   content_markdown: string | null;
+  expires_at: string | null;
 };
 
 const mapMemoShare = (row: MemoShareRow, password?: string): MemoShare => ({
@@ -81,6 +87,10 @@ const mapMemoShare = (row: MemoShareRow, password?: string): MemoShare => ({
   passwordProtected: Boolean(row.password_hash),
   showUpdatedAt: row.show_updated_at !== 0,
   showBranding: row.show_branding !== 0,
+  expiresAt: row.expires_at ?? null,
+  expired: isMemoShareExpired(row.expires_at),
+  viewCount: row.view_count ?? 0,
+  lastViewedAt: row.last_viewed_at ?? null,
   ...(password ? { password } : {}),
 });
 
@@ -98,16 +108,24 @@ const sharePasswordInvalid = (c: AppContext) =>
 const shareUnlockRateLimited = (c: AppContext) =>
   apiError(c, "share_unlock_rate_limited", "Too many share password attempts. Try again later.", 429);
 
+// Distinct from 404 so the page can say the link expired; it reveals nothing about the note.
+const shareExpired = (c: AppContext) => {
+  c.header("Cache-Control", "private, no-store");
+  c.header("X-Robots-Tag", "noindex, nofollow, noarchive");
+  return apiError(c, "share_expired", "This shared link has expired", 410);
+};
+
 const loadShareGate = async (c: AppContext, token: string) =>
   c.env.storage.db.prepare(
-    `SELECT ms.workspace_id, ms.password_hash, ms.unlock_failed_count, ms.unlock_window_started_at, ms.unlock_blocked_until
+    `SELECT ms.workspace_id, ms.password_hash, ms.expires_at, ms.unlock_failed_count, ms.unlock_window_started_at, ms.unlock_blocked_until
      FROM memo_shares ms
      INNER JOIN memos m ON m.id = ms.memo_id AND m.workspace_id = ms.workspace_id
      WHERE ms.token = ? AND m.is_deleted = 0
      LIMIT 1`
   ).bind(token).first<ShareGateRow>();
 
-const selectMemoShareSql = `SELECT memo_id, token, slug, created_at, updated_at, password_hash, password_encrypted, show_updated_at, show_branding
+const selectMemoShareSql = `SELECT memo_id, token, slug, created_at, updated_at, password_hash, password_encrypted, show_updated_at, show_branding,
+         expires_at, view_count, last_viewed_at
   FROM memo_shares WHERE memo_id = ? AND workspace_id = ?`;
 
 const NOTE_PROSE_COLUMNS = `note_prose_font_size, note_prose_line_height, note_prose_palette, note_prose_custom_css, note_prose_custom_colors`;
@@ -169,7 +187,7 @@ export const registerPublicShareRoutes = (app: Hono<AppEnv>) => {
     if (!token) return notFound(c, "Shared note not found");
 
     const row = await c.env.storage.db.prepare(
-      `SELECT ms.workspace_id, m.title, mc.content_json, mc.content_markdown, m.tags_json, m.updated_at, ms.password_hash, ms.show_updated_at, ms.show_branding,
+      `SELECT ms.workspace_id, m.title, mc.content_json, mc.content_markdown, m.tags_json, m.updated_at, ms.password_hash, ms.expires_at, ms.show_updated_at, ms.show_branding,
               u.note_body_font, u.note_prose_font_size, u.note_prose_line_height, u.note_prose_palette,
               u.note_prose_custom_css, u.note_prose_custom_colors
        FROM memo_shares ms
@@ -180,6 +198,8 @@ export const registerPublicShareRoutes = (app: Hono<AppEnv>) => {
        LIMIT 1`
     ).bind(token).first<PublicMemoShareRow>();
     if (!row || isEncryptedNoteMarkdown(row.content_markdown)) return notFound(c, "Shared note not found");
+    const now = isoNow();
+    if (isMemoShareExpired(row.expires_at, now)) return shareExpired(c);
     if (row.password_hash && !(await allowPasswordProtectedShare(c, token, row.password_hash))) {
       return sharePasswordRequired(c);
     }
@@ -194,8 +214,9 @@ export const registerPublicShareRoutes = (app: Hono<AppEnv>) => {
         `SELECT ms.memo_id, COALESCE(ms.slug, ms.token) AS token
          FROM memo_shares ms
          INNER JOIN memos m ON m.id = ms.memo_id AND m.workspace_id = ms.workspace_id
-         WHERE ms.workspace_id = ? AND ms.memo_id IN (${placeholders}) AND m.is_deleted = 0`
-      ).bind(row.workspace_id, ...batch).all<ReferencedMemoShareRow>();
+         WHERE ms.workspace_id = ? AND ms.memo_id IN (${placeholders}) AND m.is_deleted = 0
+           AND (ms.expires_at IS NULL OR ms.expires_at > ?)`
+      ).bind(row.workspace_id, ...batch, now).all<ReferencedMemoShareRow>();
       for (const linkedShare of linkedShares.results) {
         memoShareTokens[linkedShare.memo_id] = linkedShare.token;
       }
@@ -213,6 +234,8 @@ export const registerPublicShareRoutes = (app: Hono<AppEnv>) => {
       showUpdatedAt: row.show_updated_at !== 0,
       showBranding: row.show_branding !== 0,
     };
+    // Hono answers HEAD through this GET handler; a probe is not a view.
+    if (c.req.method === "GET") await recordMemoShareView(c.env.storage.db, token);
     c.header("Cache-Control", "private, no-store");
     c.header("X-Robots-Tag", "noindex, nofollow, noarchive");
     return c.json({ share });
@@ -224,6 +247,7 @@ export const registerPublicShareRoutes = (app: Hono<AppEnv>) => {
 
     const gate = await loadShareGate(c, token);
     if (!gate) return notFound(c, "Shared note not found");
+    if (isMemoShareExpired(gate.expires_at)) return shareExpired(c);
     if (!gate.password_hash) {
       return apiError(c, "share_password_not_required", "This shared note does not require a password", 400);
     }
@@ -260,7 +284,7 @@ export const registerPublicShareRoutes = (app: Hono<AppEnv>) => {
 
     const resource = await c.env.storage.db.prepare(
       `SELECT r.object_key, r.storage_config_id, r.kind, r.mime_type, r.filename, r.byte_size,
-              ms.workspace_id, ms.password_hash, mc.content_markdown
+              ms.workspace_id, ms.password_hash, ms.expires_at, mc.content_markdown
        FROM memo_shares ms
        INNER JOIN memos m ON m.id = ms.memo_id AND m.workspace_id = ms.workspace_id
        INNER JOIN resources r ON r.memo_id = m.id
@@ -268,9 +292,8 @@ export const registerPublicShareRoutes = (app: Hono<AppEnv>) => {
        WHERE ms.token = ? AND r.id = ? AND m.is_deleted = 0 AND r.is_deleted = 0
        LIMIT 1`
     ).bind(token, c.req.param("resourceId")).first<SharedResourceRow>();
-    // Fork: resources of an encrypted note may still be plaintext from before it
-    // was encrypted, so the share must not serve them.
     if (!resource || isEncryptedNoteMarkdown(resource.content_markdown)) return notFound(c, "Shared resource not found");
+    if (isMemoShareExpired(resource.expires_at)) return shareExpired(c);
     if (resource.password_hash && !(await allowPasswordProtectedShare(c, token, resource.password_hash))) {
       return sharePasswordRequired(c);
     }
@@ -290,6 +313,7 @@ export const registerMemoShareRoutes = (app: Hono<AppEnv>) => {
     const offset = Number.isSafeInteger(parsedOffset) ? Math.min(1_000_000, Math.max(0, parsedOffset)) : 0;
     const rows = await c.env.storage.db.prepare(
       `SELECT ms.memo_id, ms.token, ms.slug, ms.created_at, ms.updated_at, ms.password_hash, ms.show_updated_at, ms.show_branding,
+              ms.expires_at, ms.view_count, ms.last_viewed_at,
               m.title, m.notebook_id, n.name AS notebook_name
        FROM memo_shares ms
        INNER JOIN memos m ON m.id = ms.memo_id AND m.workspace_id = ms.workspace_id
@@ -374,7 +398,8 @@ export const registerMemoShareRoutes = (app: Hono<AppEnv>) => {
 
     c.header("Cache-Control", "private, no-store");
     const row = await c.env.storage.db.prepare(
-      `SELECT ms.memo_id, ms.token, ms.slug, ms.created_at, ms.updated_at, ms.password_hash, ms.password_encrypted, ms.show_updated_at, ms.show_branding
+      `SELECT ms.memo_id, ms.token, ms.slug, ms.created_at, ms.updated_at, ms.password_hash, ms.password_encrypted, ms.show_updated_at, ms.show_branding,
+              ms.expires_at, ms.view_count, ms.last_viewed_at
        FROM memo_shares ms
        INNER JOIN memos m ON m.id = ms.memo_id AND m.workspace_id = ms.workspace_id
        WHERE ms.memo_id = ? AND ms.workspace_id = ? AND m.is_deleted = 0
@@ -439,7 +464,11 @@ export const registerMemoShareRoutes = (app: Hono<AppEnv>) => {
 
     const now = isoNow();
     const actor = getAuditActor(c);
-    const { passwordProtected, password, slug, showUpdatedAt, showBranding } = c.req.valid("json");
+    const { passwordProtected, password, slug, showUpdatedAt, showBranding, expiresAt } = c.req.valid("json");
+    const nextExpiresAt = expiresAt ? new Date(expiresAt).toISOString() : expiresAt;
+    if (nextExpiresAt && nextExpiresAt <= now) {
+      return apiError(c, "share_expiry_invalid", "The expiry must be in the future", 400);
+    }
     if (slug !== undefined && slug !== (existing.slug ?? null)) {
       if (slug !== null) {
         await c.env.storage.db.prepare(
@@ -484,6 +513,20 @@ export const registerMemoShareRoutes = (app: Hono<AppEnv>) => {
         "memo",
         memoId,
         { showUpdatedAt, showBranding },
+      );
+    }
+    if (nextExpiresAt !== undefined && nextExpiresAt !== (existing.expires_at ?? null)) {
+      await c.env.storage.db.prepare(
+        `UPDATE memo_shares SET expires_at = ?, updated_at = ? WHERE memo_id = ? AND workspace_id = ?`
+      ).bind(nextExpiresAt, now, memoId, workspaceId).run();
+      await audit(
+        c.env.storage.db,
+        actor.actorType,
+        actor.actorId,
+        nextExpiresAt ? "memo.share_expiry_set" : "memo.share_expiry_clear",
+        "memo",
+        memoId,
+        nextExpiresAt ? { expiresAt: nextExpiresAt } : {},
       );
     }
     if (passwordProtected === undefined && password === undefined) {

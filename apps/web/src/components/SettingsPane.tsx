@@ -1,8 +1,10 @@
 import {
   AudioLines,
+  BookOpenText,
+  PenLine,
   ChevronLeft,
   ChevronRight,
-  Database,
+  DatabaseBackup,
   Info,
   Keyboard,
   KeyRound,
@@ -15,7 +17,7 @@ import {
   Users,
   Wrench,
 } from "lucide-react";
-import { useSyncExternalStore, type ReactNode } from "react";
+import { lazy, Suspense, useState, useSyncExternalStore, type ReactNode } from "react";
 import { isDesktopViewport } from "@/lib/workspace-shell";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router";
@@ -26,29 +28,34 @@ import type { ShortcutSettings } from "@/lib/app-helpers";
 import type { NoteProsePatch, ResolvedNoteProse } from "@edgeever/shared";
 import { BETA_BADGE_CLASSNAME, WORKSPACE_PAGE_TITLE_CLASSNAME } from "@/lib/workspace-ui";
 import { cn } from "@/lib/utils";
-import { AccountInfoCard } from "./settings/AccountInfoCard";
-import { DesktopScheduledBackupCard } from "./settings/DesktopScheduledBackupCard";
-import { DataExportCard } from "./settings/DataExportCard";
-import { DesktopLocalDataCard } from "./settings/DesktopLocalDataCard";
-import { LoginDevicesCard } from "./settings/LoginDevicesCard";
-import { ShareManagementCard } from "./settings/ShareManagementCard";
-import { EvernoteImportGuideCard } from "./settings/EvernoteImportGuideCard";
+import type { NoteImportController } from "@/lib/note-import/controller";
 import { FeedbackLink } from "./settings/FeedbackLink";
-import { SystemInfoPanel } from "./settings/SystemInfoPanel";
-import { McpConfigCard } from "./settings/McpConfigCard";
 import { PreferenceCard } from "./settings/PreferenceCard";
-import { ShortcutSettingsItem } from "./settings/ShortcutSettingsItem";
-import { PasswordCard } from "./settings/PasswordCard";
-import { UserManagementCard } from "./settings/UserManagementCard";
-import { ObjectStorageCard } from "./settings/ObjectStorageCard";
-import { AiModelCard } from "./settings/AiModelCard";
-import { SpeechTranscriptionCard } from "./settings/SpeechTranscriptionCard";
-import { DesktopAcpAgentCard } from "./settings/DesktopAcpAgentCard";
 import { ThemeToggle } from "./ThemeToggle";
 import type { AuthUser } from "@edgeever/shared";
 import { contentEnterMotion } from "@/lib/motion";
 import { useDeployedUpdateNotice } from "@/hooks/useDeployedUpdateNotice";
 import { ExecutionCenterButton } from "@/components/execution/ExecutionCenterButton";
+
+// Keep optional settings dependencies off the personal-center entry path.
+const AccountInfoCard = lazy(() => import("./settings/AccountInfoCard").then((module) => ({ default: module.AccountInfoCard })));
+const DesktopScheduledBackupCard = lazy(() => import("./settings/DesktopScheduledBackupCard").then((module) => ({ default: module.DesktopScheduledBackupCard })));
+const DataExportCard = lazy(() => import("./settings/DataExportCard").then((module) => ({ default: module.DataExportCard })));
+const DesktopLocalDataCard = lazy(() => import("./settings/DesktopLocalDataCard").then((module) => ({ default: module.DesktopLocalDataCard })));
+const LoginDevicesCard = lazy(() => import("./settings/LoginDevicesCard").then((module) => ({ default: module.LoginDevicesCard })));
+const ShareManagementCard = lazy(() => import("./settings/ShareManagementCard").then((module) => ({ default: module.ShareManagementCard })));
+const ThirdPartyImportCard = lazy(() => import("./settings/ThirdPartyImportCard").then((module) => ({ default: module.ThirdPartyImportCard })));
+const SystemInfoPanel = lazy(() => import("./settings/SystemInfoPanel").then((module) => ({ default: module.SystemInfoPanel })));
+const McpConfigCard = lazy(() => import("./settings/McpConfigCard").then((module) => ({ default: module.McpConfigCard })));
+const AiSpaceShortcutSettingsItem = lazy(() => import("./settings/AiSpaceShortcutSettingsItem").then((module) => ({ default: module.AiSpaceShortcutSettingsItem })));
+const ShortcutSettingsItem = lazy(() => import("./settings/ShortcutSettingsItem").then((module) => ({ default: module.ShortcutSettingsItem })));
+const PasswordCard = lazy(() => import("./settings/PasswordCard").then((module) => ({ default: module.PasswordCard })));
+const TwoFactorCard = lazy(() => import("./settings/TwoFactorCard").then((module) => ({ default: module.TwoFactorCard })));
+const UserManagementCard = lazy(() => import("./settings/UserManagementCard").then((module) => ({ default: module.UserManagementCard })));
+const ObjectStorageCard = lazy(() => import("./settings/ObjectStorageCard").then((module) => ({ default: module.ObjectStorageCard })));
+const AiModelCard = lazy(() => import("./settings/AiModelCard").then((module) => ({ default: module.AiModelCard })));
+const SpeechTranscriptionCard = lazy(() => import("./settings/SpeechTranscriptionCard").then((module) => ({ default: module.SpeechTranscriptionCard })));
+const DesktopAcpAgentCard = lazy(() => import("./settings/DesktopAcpAgentCard").then((module) => ({ default: module.DesktopAcpAgentCard })));
 
 const subscribeViewport = (callback: () => void) => {
   const media = window.matchMedia("(min-width: 1024px)");
@@ -73,6 +80,8 @@ interface SettingsPaneProps {
   isOwner: boolean;
   user: AuthUser | null;
   refreshWorkspaceAfterImport: () => Promise<void>;
+  noteImport: NoteImportController;
+  defaultImportNotebookId: string | null;
   onOpenExecutionCenter: () => void;
   onOpenMemo: (memoId: string, notebookId: string) => void;
 }
@@ -84,7 +93,12 @@ const SettingsGroup = ({ children }: { children: ReactNode }) => (
   </div>
 );
 
-type TabKey = "general" | "shortcuts" | "users" | "data" | "ai" | "mcp" | "speech" | "sharing" | "advanced" | "account" | "system";
+const SettingsLoadingFallback = () => {
+  const { t } = useTranslation();
+  return <div role="status" className="p-6 text-sm text-slate-500">{t("workspace.loading.settings")}</div>;
+};
+
+type TabKey = "general" | "reading" | "editing" | "shortcuts" | "users" | "data" | "ai" | "mcp" | "speech" | "sharing" | "advanced" | "account" | "system";
 
 interface TabItem {
   key: TabKey;
@@ -110,6 +124,8 @@ export const SettingsPane = ({
   isOwner,
   user,
   refreshWorkspaceAfterImport,
+  noteImport,
+  defaultImportNotebookId,
   onOpenExecutionCenter,
   onOpenMemo,
 }: SettingsPaneProps) => {
@@ -119,12 +135,23 @@ export const SettingsPane = ({
   const selectTab = (tab: TabKey | null) => setSearchParams(tab ? { tab } : {}, { replace: true });
   const { unseen: deployedUpdateUnseen } = useDeployedUpdateNotice();
   const canClearLocalData = Boolean(window.edgeeverDesktop?.canClearLocalData);
+  const [devShowWebExport, setDevShowWebExport] = useState(false);
 
   const tabItems: TabItem[] = [
     {
       key: "general",
       label: t("settings.tabs.general"),
       icon: SlidersHorizontal,
+    },
+    {
+      key: "reading",
+      label: t("settings.tabs.reading"),
+      icon: BookOpenText,
+    },
+    {
+      key: "editing",
+      label: t("settings.tabs.editing"),
+      icon: PenLine,
     },
     {
       key: "shortcuts",
@@ -149,7 +176,7 @@ export const SettingsPane = ({
     {
       key: "data",
       label: t("settings.tabs.data"),
-      icon: Database,
+      icon: DatabaseBackup,
     },
     {
       key: "sharing",
@@ -218,29 +245,37 @@ export const SettingsPane = ({
 
   const desktopViewport = useSyncExternalStore(subscribeViewport, isDesktopViewport);
   const renderTabContent = (key: TabKey, desktopLayout: boolean) => {
-    // Backup dialogs reflect a main-process task; mount one consumer, not both CSS layouts.
-    if (key === "data" && desktopLayout !== desktopViewport) return null;
+    // Mount only the visible layout so hidden tabs do not load code or run queries.
+    if (desktopLayout !== desktopViewport) return null;
     switch (key) {
       case "general":
+      case "reading":
+      case "editing":
         return (
           <div className="grid gap-6">
             <PreferenceCard
+              section={key}
               imageCompressionEnabled={imageCompressionEnabled}
               onImageCompressionChange={onImageCompressionChange}
               noteProse={noteProse}
               onNoteProseChange={onNoteProseChange}
             />
-            <div className="hidden overflow-hidden rounded-xl border border-slate-200 bg-card lg:block">
-              <FeedbackLink />
-            </div>
+            {key === "general" ? (
+              <div className="hidden overflow-hidden rounded-xl border border-slate-200 bg-card lg:block">
+                <FeedbackLink />
+              </div>
+            ) : null}
           </div>
         );
       case "shortcuts":
         return (
-          <ShortcutSettingsItem
-            shortcutSettings={shortcutSettings}
-            onShortcutSettingsChange={onShortcutSettingsChange}
-          />
+          <div className="grid gap-6">
+            <AiSpaceShortcutSettingsItem />
+            <ShortcutSettingsItem
+              shortcutSettings={shortcutSettings}
+              onShortcutSettingsChange={onShortcutSettingsChange}
+            />
+          </div>
         );
       case "users":
         return isOwner ? (
@@ -251,8 +286,24 @@ export const SettingsPane = ({
       case "data":
         return (
           <SettingsGroup>
-            {window.edgeeverDesktop?.backup ? <DesktopScheduledBackupCard /> : <DataExportCard refreshWorkspaceAfterImport={refreshWorkspaceAfterImport} />}
-            <EvernoteImportGuideCard />
+            {import.meta.env.DEV && (
+              <div className="flex items-center justify-between rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-700 dark:text-amber-300">
+                <span>Dev 预览模式：{devShowWebExport ? "当前为 Web 端原生导出卡片" : "当前为桌面端备份与恢复预览"}</span>
+                <button
+                  type="button"
+                  className="font-medium underline hover:text-amber-900 dark:hover:text-amber-100"
+                  onClick={() => setDevShowWebExport((prev) => !prev)}
+                >
+                  {devShowWebExport ? "切换到桌面端预览" : "切换到 Web 原生导出"}
+                </button>
+              </div>
+            )}
+            {window.edgeeverDesktop?.backup || (import.meta.env.DEV && !devShowWebExport) ? (
+              <DesktopScheduledBackupCard />
+            ) : (
+              <DataExportCard refreshWorkspaceAfterImport={refreshWorkspaceAfterImport} />
+            )}
+            <ThirdPartyImportCard controller={noteImport} defaultNotebookId={defaultImportNotebookId} />
           </SettingsGroup>
         );
       case "sharing":
@@ -286,14 +337,11 @@ export const SettingsPane = ({
       case "account":
         return (
           <SettingsGroup>
-            <AccountInfoCard user={user} />
+            <AccountInfoCard user={user} isLoggingOut={isLoggingOut} onLogout={onLogout} />
             <PasswordCard authRequired={authRequired} demoMode={demoMode} />
+            {demoMode ? null : <TwoFactorCard authRequired={authRequired} />}
             {demoMode ? null : (
-              <LoginDevicesCard
-                authRequired={authRequired}
-                isLoggingOut={isLoggingOut}
-                onLogout={onLogout}
-              />
+              <LoginDevicesCard authRequired={authRequired} />
             )}
           </SettingsGroup>
         );
@@ -376,7 +424,9 @@ export const SettingsPane = ({
           {/* 右侧设置内容区 */}
           <main className="flex-1 min-w-0 overflow-y-auto [scrollbar-gutter:stable] pr-2">
             <m.div key={activeTab} className="grid gap-4" {...contentEnterMotion}>
-              {renderTabContent(activeTab, true)}
+              <Suspense fallback={<SettingsLoadingFallback />}>
+                {renderTabContent(activeTab, true)}
+              </Suspense>
             </m.div>
           </main>
         </div>
@@ -446,7 +496,9 @@ export const SettingsPane = ({
           ) : (
             /* 详情页面 */
             <m.div key={activeMobileTab} className="grid gap-4" {...contentEnterMotion}>
-              {renderTabContent(activeMobileTab, false)}
+              <Suspense fallback={<SettingsLoadingFallback />}>
+                {renderTabContent(activeMobileTab, false)}
+              </Suspense>
             </m.div>
           )}
         </div>

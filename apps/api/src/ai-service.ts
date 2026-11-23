@@ -3,6 +3,9 @@ import type {
   AiAttachmentInput,
   AiGenerationResultBoundary,
   AiModelConfig,
+  AiModelCapabilities,
+  AiModelCapabilitySource,
+  AiModelOutputBudgets,
   AiPreparedGeneration,
   AiProvider,
   AiProviderConfig,
@@ -16,6 +19,7 @@ import type {
 } from "@edgeever/shared";
 import {
   AI_GENERATION_MAX_OUTPUT_TOKENS,
+  AI_MODEL_CAPABILITY_SOURCES,
   createAiGenerationResultBoundary,
   createAiGenerationStreamNormalizer,
   getDefaultAiPromptSeed,
@@ -23,6 +27,7 @@ import {
   normalizeAiGenerationText,
 } from "@edgeever/shared";
 
+import type { AiGenerationSegmentContext } from "@edgeever/shared/ai-generation-segments";
 import type { ModelMessage, UserContent } from "ai";
 import { AppError } from "./app-error";
 import { decryptSecret } from "./secret-encryption";
@@ -47,7 +52,18 @@ export type AiProviderConfigRow = {
   updated_at: string;
 };
 
-export type AiModelConfigRow = {
+type AiModelOutputBudgetColumns = {
+  generation_max_output_tokens: number | null;
+  tag_suggestion_max_output_tokens: number | null;
+  companion_max_output_tokens: number | null;
+  detected_max_output_tokens?: number | null;
+  detected_max_input_tokens?: number | null;
+  detected_context_window_tokens?: number | null;
+  detected_capability_source?: string | null;
+  detected_at?: string | null;
+};
+
+export type AiModelConfigRow = AiModelOutputBudgetColumns & {
   id: string;
   provider_config_id: string;
   model_id: string;
@@ -56,7 +72,7 @@ export type AiModelConfigRow = {
   updated_at: string;
 };
 
-export type ResolvedAiModelRow = {
+export type ResolvedAiModelRow = AiModelOutputBudgetColumns & {
   model_config_id: string;
   model_id: string;
   provider_config_id: string;
@@ -64,12 +80,37 @@ export type ResolvedAiModelRow = {
   base_url: string;
   api_key_encrypted: string;
   is_enabled: number;
+  provider_updated_at: string;
+};
+
+const mapAiModelOutputBudgets = (row: Partial<AiModelOutputBudgetColumns>): AiModelOutputBudgets => ({
+  generationMaxOutputTokens: row.generation_max_output_tokens ?? null,
+  tagSuggestionMaxOutputTokens: row.tag_suggestion_max_output_tokens ?? null,
+  companionMaxOutputTokens: row.companion_max_output_tokens ?? null,
+});
+
+/** Detected provider limits (#652); `null` until a client has reported them. */
+const mapAiModelCapabilities = (row: Partial<AiModelOutputBudgetColumns>): AiModelCapabilities | null => {
+  if (!row.detected_at || !row.detected_capability_source) return null;
+  const source = (AI_MODEL_CAPABILITY_SOURCES as readonly string[]).includes(row.detected_capability_source)
+    ? row.detected_capability_source as AiModelCapabilitySource
+    : "none";
+  return {
+    maxOutputTokens: row.detected_max_output_tokens ?? null,
+    maxInputTokens: row.detected_max_input_tokens ?? null,
+    contextWindowTokens: row.detected_context_window_tokens ?? null,
+    source,
+    detectedAt: row.detected_at,
+  };
 };
 
 const selectProviderSql = `SELECT id, workspace_id, provider, display_name, base_url,
   api_key_encrypted, is_enabled, created_at, updated_at FROM ai_provider_configs`;
 
 const selectModelSql = `SELECT id, provider_config_id, model_id, display_name,
+  generation_max_output_tokens, tag_suggestion_max_output_tokens, companion_max_output_tokens,
+  detected_max_output_tokens, detected_max_input_tokens, detected_context_window_tokens,
+  detected_capability_source, detected_at,
   created_at, updated_at FROM ai_models`;
 
 export const resolveCredentialEncryptionKey = (value: string | undefined) => {
@@ -162,6 +203,8 @@ export const mapAiModelConfig = (row: AiModelConfigRow): AiModelConfig => ({
   providerConfigId: row.provider_config_id,
   modelId: row.model_id,
   displayName: row.display_name,
+  ...mapAiModelOutputBudgets(row),
+  detectedCapabilities: mapAiModelCapabilities(row),
 });
 
 export const mapAiProviderConfig = (
@@ -418,7 +461,11 @@ export const prepareAiTranscriptionCredentials = async (
   }
 };
 
-export const loadDefaultAiModelCredentials = async (
+/**
+ * Resolve the default model's credentials and output budgets from one row so a
+ * concurrent default-model switch can never pair one model's key with another's budget.
+ */
+export const resolveDefaultAiModel = async (
   db: DatabaseAdapter,
   workspaceId: string,
   environment: AiCredentialEnvironment,
@@ -427,11 +474,20 @@ export const loadDefaultAiModelCredentials = async (
     `SELECT
        models.id AS model_config_id,
        models.model_id,
+       models.generation_max_output_tokens,
+       models.tag_suggestion_max_output_tokens,
+       models.companion_max_output_tokens,
+       models.detected_max_output_tokens,
+       models.detected_max_input_tokens,
+       models.detected_context_window_tokens,
+       models.detected_capability_source,
+       models.detected_at,
        providers.id AS provider_config_id,
        providers.provider,
        providers.base_url,
        providers.api_key_encrypted,
-       providers.is_enabled
+       providers.is_enabled,
+       providers.updated_at AS provider_updated_at
      FROM ai_workspace_settings AS settings
      JOIN ai_models AS models ON models.id = settings.default_model_id
      JOIN ai_provider_configs AS providers ON providers.id = models.provider_config_id
@@ -452,12 +508,30 @@ export const loadDefaultAiModelCredentials = async (
     );
   }
   return {
-    provider: row.provider,
-    baseUrl: normalizeAiBaseUrl(row.base_url),
-    apiKey: await decryptAiCredential(row.api_key_encrypted, environment),
-    modelId: row.model_id,
+    credentials: {
+      provider: row.provider,
+      baseUrl: normalizeAiBaseUrl(row.base_url),
+      apiKey: await decryptAiCredential(row.api_key_encrypted, environment),
+      modelId: row.model_id,
+    },
+    outputBudgets: mapAiModelOutputBudgets(row),
+    capabilities: mapAiModelCapabilities(row),
+    modelConfigId: row.model_config_id,
+    providerConfigId: row.provider_config_id,
+    /** Identifies the provider configuration that detected limits are reported against. */
+    providerConfigVersion: row.provider_updated_at,
   };
 };
+
+export type ResolvedDefaultAiModel = Awaited<ReturnType<typeof resolveDefaultAiModel>>;
+export type AiModelCredentials = ResolvedDefaultAiModel["credentials"];
+
+/** Credentials only: callers spread this into prepare responses, so its shape must stay unchanged. */
+export const loadDefaultAiModelCredentials = async (
+  db: DatabaseAdapter,
+  workspaceId: string,
+  environment: AiCredentialEnvironment,
+): Promise<AiModelCredentials> => (await resolveDefaultAiModel(db, workspaceId, environment)).credentials;
 
 export const getDefaultAiDirectTarget = async (
   db: DatabaseAdapter,
@@ -532,6 +606,21 @@ export const resolveAiGenerationSystemInstruction = (input: {
   return `${actionInstruction}${attachmentInstruction} ${AI_PROMPT_OUTPUT_INSTRUCTION}${boundaryInstruction}`;
 };
 
+const aiSegmentInstruction = (segment: AiGenerationSegmentContext) =>
+  ` This request covers part ${segment.index + 1} of ${segment.count} of a longer note. Process only this part and return its complete result: every heading, paragraph, list, table and code block in it, including any at its very start or end. Do not add a title, introduction, summary or closing remarks that are not in this part, and keep terminology and style consistent with the earlier parts.`;
+
+const AI_CONTINUATION_INSTRUCTION = " Your previous response to this request was cut off before it was complete. Continue it from exactly where it stopped. Do not repeat text that was already written and do not start over.";
+
+/** Context for one part of a long note; the model must not copy it into the result. */
+const buildAiSegmentContext = (segment: AiGenerationSegmentContext) => {
+  const lines = [
+    segment.headingPath.length ? `Section: ${segment.headingPath.join(" > ")}` : undefined,
+    segment.previousSourceTail ? `End of the previous part:\n${segment.previousSourceTail}` : undefined,
+    segment.previousOutputTail ? `End of the previous part's result:\n${segment.previousOutputTail}` : undefined,
+  ].filter(Boolean);
+  return lines.length ? ["Context for this part (do not include it in the result):", ...lines].join("\n") : undefined;
+};
+
 export const buildAiGenerationPrompt = (input: {
   contentMarkdown: string;
   targetLanguage?: AiTargetLanguage;
@@ -549,6 +638,11 @@ const decodeBase64Text = (base64Data: string) => {
   const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
   return new TextDecoder().decode(bytes);
 };
+
+/** Decoded text attachments, for estimating how much of the context window the input uses. */
+export const aiTextAttachmentContents = (attachments: AiAttachmentInput[] | undefined) =>
+  (attachments ?? []).filter((attachment) => isAiTextAttachment(attachment.mediaType))
+    .map((attachment) => decodeBase64Text(attachment.base64Data));
 
 export const buildAiGenerationMessages = (
   prompt: string,
@@ -574,13 +668,16 @@ export const buildAiGenerationMessages = (
 };
 
 export const prepareAiGeneration = (input: {
-  credentials: Awaited<ReturnType<typeof loadDefaultAiModelCredentials>>;
+  credentials: AiModelCredentials;
+  maxOutputTokens?: number;
   action: AiAction;
   contentMarkdown: string;
   targetLanguage?: AiTargetLanguage;
   tone?: AiTone;
   instruction?: string;
   attachments?: AiAttachmentInput[];
+  segment?: AiGenerationSegmentContext;
+  continuation?: { round: number; previousOutput: string };
 }): AiPreparedGeneration => {
   const resultBoundary = createAiGenerationResultBoundary();
   return {
@@ -591,14 +688,21 @@ export const prepareAiGeneration = (input: {
       instruction: input.instruction,
       attachments: input.attachments,
       resultBoundary,
-    }),
-    prompt: buildAiGenerationPrompt({
-      contentMarkdown: input.contentMarkdown,
-      targetLanguage: input.targetLanguage,
-      tone: input.tone,
-      instruction: input.instruction,
-    }),
-    maxOutputTokens: AI_GENERATION_MAX_OUTPUT_TOKENS,
+    }) + (input.segment ? aiSegmentInstruction(input.segment) : "")
+      + (input.continuation ? AI_CONTINUATION_INSTRUCTION : ""),
+    prompt: [
+      buildAiGenerationPrompt({
+        contentMarkdown: input.contentMarkdown,
+        targetLanguage: input.targetLanguage,
+        tone: input.tone,
+        instruction: input.instruction,
+      }),
+      input.segment ? buildAiSegmentContext(input.segment) : undefined,
+      input.continuation
+        ? `Response so far (it was cut off; continue from its last character):\n${input.continuation.previousOutput}`
+        : undefined,
+    ].filter(Boolean).join("\n\n"),
+    maxOutputTokens: input.maxOutputTokens ?? AI_GENERATION_MAX_OUTPUT_TOKENS,
     resultBoundary,
   };
 };

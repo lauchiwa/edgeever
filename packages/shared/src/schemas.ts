@@ -18,6 +18,8 @@ import {
   getBase64DecodedByteLength,
   isAiTextAttachment,
 } from "./ai-assistant";
+import { AI_MODEL_OUTPUT_BUDGET_LIMITS, type AiModelOutputBudgetField } from "./ai-output-budgets";
+import { AI_MODEL_CAPABILITY_MAX_TOKENS, AI_MODEL_CAPABILITY_SOURCES } from "./ai-model-capabilities";
 
 export const NotebookCreateSchema = z.object({
   name: z.string().trim().min(1).max(80),
@@ -194,6 +196,42 @@ export const LoginSchema = z.object({
   locale: z.string().trim().min(1).max(35).optional(),
 });
 
+const TotpCodeField = z.string().trim().min(6).max(12);
+const RecoveryCodeField = z.string().trim().min(10).max(32);
+
+export const LoginMfaSchema = z.object({
+  challengeToken: z.string().trim().min(16).max(128),
+  code: TotpCodeField.optional(),
+  recoveryCode: RecoveryCodeField.optional(),
+  deviceId: z.string().trim().min(16).max(160).optional(),
+  locale: z.string().trim().min(1).max(35).optional(),
+}).refine((input) => Boolean(input.code) !== Boolean(input.recoveryCode), {
+  message: "Provide either an authenticator code or a recovery code.",
+  path: ["code"],
+});
+
+/** Identity check before enabling (password) or changing TOTP (password + code). */
+export const TotpReauthSchema = z.object({
+  password: z.string().min(1).max(512).optional(),
+  code: TotpCodeField.optional(),
+  /** Alternative to `code` when the authenticator is unavailable; it is consumed. */
+  recoveryCode: RecoveryCodeField.optional(),
+});
+
+/** Opaque id the server issued for one enrollment flow or one batch of recovery codes. */
+const TotpFlowIdField = z.string().trim().min(8).max(80);
+
+/** Step 2 of enrollment: the authenticator code, for the setup the client was shown. */
+export const TotpSetupVerifySchema = z.object({
+  setupId: TotpFlowIdField,
+  code: TotpCodeField,
+});
+
+/** Last step of enrollment or of regenerating codes: the batch the user saved. */
+export const TotpBatchConfirmSchema = z.object({
+  batchId: TotpFlowIdField,
+});
+
 export const LoginDeviceSessionUpdateSchema = z.object({
   label: z.string().trim().max(80).nullable(),
 });
@@ -223,11 +261,59 @@ export const UserUpdateSchema = z
   })
   .refine((input) => Object.keys(input).length > 0, "At least one field is required.");
 
+/**
+ * Notebook whitelist model: a token either reaches the whole workspace
+ * (unrestricted) or exactly the whitelisted notebook subtrees. One access
+ * level — read-only or read/write — applies to the whole whitelist.
+ */
+export const TokenNotebookAccessSchema = z.object({
+  notebookId: z.string().trim().min(1).max(120),
+  read: z.boolean(),
+  write: z.boolean(),
+});
+
+export type TokenNotebookAccess = z.infer<typeof TokenNotebookAccessSchema>;
+
+export const TokenNotebookAccessListSchema = z
+  .array(TokenNotebookAccessSchema)
+  .max(200)
+  .refine(
+    (entries) => new Set(entries.map((entry) => entry.notebookId)).size === entries.length,
+    "notebookId must be unique within notebookAccess.",
+  );
+
+/** The single access level applied to a token's whole notebook whitelist. */
+export const TokenNotebookAccessLevelSchema = z.enum(["read", "write"]);
+
+export type TokenNotebookAccessLevel = z.infer<typeof TokenNotebookAccessLevelSchema>;
+
 export const ApiTokenCreateSchema = z.object({
   name: z.string().trim().min(1).max(80),
   scopes: z.array(z.string().trim().min(1).max(80)).min(1).max(32),
   expiresAt: z.string().datetime().nullable().optional(),
+  /**
+   * Omitted = new tokens default to no access (an empty whitelist). An array
+   * (possibly empty) = set that whitelist. `null` = explicitly create an
+   * unrestricted token (whole workspace), matching the editor's "full access"
+   * and "read-only" choices.
+   */
+  notebookAccess: TokenNotebookAccessListSchema.nullable().optional(),
+  notebookAccessLevel: TokenNotebookAccessLevelSchema.optional(),
 });
+
+export const ApiTokenUpdateSchema = z
+  .object({
+    name: z.string().trim().min(1).max(80).optional(),
+    scopes: z.array(z.string().trim().min(1).max(80)).min(1).max(32).optional(),
+    expiresAt: z.string().datetime().nullable().optional(),
+    /**
+     * Omitted = keep the stored whitelist; an array (possibly empty) = set
+     * it; null = remove the notebook restriction entirely.
+     */
+    notebookAccess: TokenNotebookAccessListSchema.nullable().optional(),
+    notebookAccessLevel: TokenNotebookAccessLevelSchema.optional(),
+  })
+  .refine((input) => Object.keys(input).length > 0, "At least one field is required.");
 
 export const TagRenameSchema = z.object({
   name: z.string().trim().min(1).max(80),
@@ -346,10 +432,46 @@ export const AiProviderConnectionTestSchema = z.object({
   apiKey: z.string().min(1).max(4096).optional(),
 });
 
+const aiModelOutputBudget = (field: AiModelOutputBudgetField) => z.number()
+  .int()
+  .min(AI_MODEL_OUTPUT_BUDGET_LIMITS[field].min)
+  .max(AI_MODEL_OUTPUT_BUDGET_LIMITS[field].max)
+  .nullable()
+  .optional();
+
+const aiModelOutputBudgetShape = {
+  generationMaxOutputTokens: aiModelOutputBudget("generationMaxOutputTokens"),
+  tagSuggestionMaxOutputTokens: aiModelOutputBudget("tagSuggestionMaxOutputTokens"),
+  companionMaxOutputTokens: aiModelOutputBudget("companionMaxOutputTokens"),
+};
+
 export const AiModelConfigCreateSchema = z.object({
   modelId: z.string().trim().min(1).max(200),
   displayName: z.string().trim().min(1).max(200).optional(),
+  ...aiModelOutputBudgetShape,
 });
+
+const aiCapabilityTokens = z.number().int().positive().max(AI_MODEL_CAPABILITY_MAX_TOKENS).nullable();
+
+/** Limits a client read from the provider for one model; checked against the saved model and endpoint. */
+export const AiModelCapabilitiesReportSchema = z.object({
+  provider: AiProviderSchema,
+  modelId: z.string().trim().min(1).max(200),
+  baseUrl: z.string().trim().min(1).max(2048),
+  /** The provider configuration the limits were read for (its `updated_at`). */
+  configVersion: z.string().trim().min(1).max(64),
+  maxOutputTokens: aiCapabilityTokens,
+  maxInputTokens: aiCapabilityTokens,
+  contextWindowTokens: aiCapabilityTokens,
+  source: z.enum(AI_MODEL_CAPABILITY_SOURCES),
+}).strict();
+
+/** An omitted field keeps its current value; `null` restores the EdgeEver default. */
+export const AiModelConfigUpdateSchema = z.object(aiModelOutputBudgetShape)
+  .strict()
+  .refine((value) => Object.values(value).some((field) => field !== undefined), {
+    message: "At least one model setting is required.",
+  });
 
 export const AiDefaultModelUpdateSchema = z.object({
   modelConfigId: z.string().trim().min(1).nullable(),
@@ -385,7 +507,30 @@ export const AiGenerateSchema = z.object({
   tone: z.enum(AI_TONES).optional(),
   instruction: z.string().trim().min(1).max(2_000).optional(),
   attachments: z.array(AiAttachmentSchema).max(MAX_AI_ATTACHMENTS).default([]),
+  /** The client can send a request without an output limit when none is known (#652). */
+  allowUnboundedOutput: z.boolean().optional(),
+  /**
+   * The client can run a long source-sized task in parts (#652). When one request cannot finish
+   * it, prepare returns `segments` instead of a request. `depth` > 0 re-splits a part that was cut off.
+   */
+  segmentation: z.object({ depth: z.number().int().min(0).max(2).default(0) }).strict().optional(),
+  /** This request is one part of a long note, with context from the parts before it. */
+  segment: z.object({
+    index: z.number().int().min(0).max(199),
+    count: z.number().int().min(1).max(200),
+    headingPath: z.array(z.string().max(200)).max(6).default([]),
+    previousSourceTail: z.string().max(1_000).optional(),
+    previousOutputTail: z.string().max(1_000).optional(),
+  }).strict().refine((segment) => segment.index < segment.count, { message: "The part index is out of range." }).optional(),
+  /** Continue a result that was cut off: the end of what was written so far. */
+  continuation: z.object({
+    round: z.number().int().min(1).max(3),
+    previousOutput: z.string().min(1).max(20_000),
+  }).strict().optional(),
 }).superRefine((input, context) => {
+  if (input.continuation && (input.segment || input.segmentation)) {
+    context.addIssue({ code: "custom", path: ["continuation"], message: "A continuation cannot be split into parts." });
+  }
   if (!input.promptId && input.action === "translate" && !input.targetLanguage) {
     context.addIssue({ code: "custom", path: ["targetLanguage"], message: "A target language is required for translation." });
   }
@@ -451,7 +596,9 @@ export const MemoShareUpdateSchema = z.object({
   slug: z.string().trim().toLowerCase().refine(isValidMemoShareSlug).nullable().optional(),
   showUpdatedAt: z.boolean().optional(),
   showBranding: z.boolean().optional(),
-}).refine((input) => input.passwordProtected !== undefined || input.password !== undefined || input.slug !== undefined || input.showUpdatedAt !== undefined || input.showBranding !== undefined, {
+  /** ISO instant with an offset, or null to remove the expiry. The server rejects past instants. */
+  expiresAt: z.string().datetime({ offset: true }).nullable().optional(),
+}).refine((input) => input.passwordProtected !== undefined || input.password !== undefined || input.slug !== undefined || input.showUpdatedAt !== undefined || input.showBranding !== undefined || input.expiresAt !== undefined, {
   message: "At least one field is required.",
 });
 export const NotebookShareUpdateSchema = SharePasswordUpdateSchema;
@@ -555,11 +702,16 @@ export type MoveMemosInput = z.infer<typeof MoveMemosSchema>;
 export type DeleteMemosInput = z.infer<typeof DeleteMemosSchema>;
 export type MergeMemosInput = z.infer<typeof MergeMemosSchema>;
 export type LoginInput = z.infer<typeof LoginSchema>;
+export type LoginMfaInput = z.infer<typeof LoginMfaSchema>;
+export type TotpReauthInput = z.infer<typeof TotpReauthSchema>;
+export type TotpSetupVerifyInput = z.infer<typeof TotpSetupVerifySchema>;
+export type TotpBatchConfirmInput = z.infer<typeof TotpBatchConfirmSchema>;
 export type LoginDeviceSessionUpdateInput = z.infer<typeof LoginDeviceSessionUpdateSchema>;
 export type ChangePasswordInput = z.infer<typeof ChangePasswordSchema>;
 export type UserCreateInput = z.infer<typeof UserCreateSchema>;
 export type UserUpdateInput = z.infer<typeof UserUpdateSchema>;
 export type ApiTokenCreateInput = z.infer<typeof ApiTokenCreateSchema>;
+export type ApiTokenUpdateInput = z.infer<typeof ApiTokenUpdateSchema>;
 export type TagRenameInput = z.infer<typeof TagRenameSchema>;
 export type ResourceUpdateInput = z.infer<typeof ResourceUpdateSchema>;
 export type ObjectStorageSettingsUpdateInput = z.infer<typeof ObjectStorageSettingsUpdateSchema>;
@@ -568,6 +720,8 @@ export type AiProviderConfigCreateInput = z.infer<typeof AiProviderConfigCreateS
 export type AiProviderConfigUpdateInput = z.infer<typeof AiProviderConfigUpdateSchema>;
 export type AiProviderConnectionTestInput = z.infer<typeof AiProviderConnectionTestSchema>;
 export type AiModelConfigCreateInput = z.infer<typeof AiModelConfigCreateSchema>;
+export type AiModelConfigUpdateInput = z.infer<typeof AiModelConfigUpdateSchema>;
+export type AiModelCapabilitiesReportInput = z.infer<typeof AiModelCapabilitiesReportSchema>;
 export type AiDefaultModelUpdateInput = z.infer<typeof AiDefaultModelUpdateSchema>;
 export type AiGenerateInput = z.input<typeof AiGenerateSchema>;
 export type AiAttachmentInput = z.infer<typeof AiAttachmentSchema>;
