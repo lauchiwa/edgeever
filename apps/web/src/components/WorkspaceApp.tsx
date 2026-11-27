@@ -1822,9 +1822,12 @@ export const WorkspaceApp = ({
       } else if (failure.type === "save") {
         setWeChatImportFailureId(failure.importId);
       } else {
+        const description = failure.reason === "unsupported-messages" ? "memoList.importWeChatUnsupportedMessages"
+          : failure.reason === "unrecognized" ? "memoList.importWeChatUnrecognized"
+          : "memoList.importWeChatFailed";
         setAppNoticeDialog({
           title: t("memoList.importWeChatFailedTitle"),
-          description: t(failure.reason === "unrecognized" ? "memoList.importWeChatUnrecognized" : "memoList.importWeChatFailed"),
+          description: t(description),
         });
       }
     },
