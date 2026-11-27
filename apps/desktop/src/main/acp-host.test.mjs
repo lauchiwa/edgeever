@@ -33,6 +33,19 @@ const home = path.resolve(homedir());
 
 const encode = (value) => Buffer.from(value).toString("base64");
 
+const canonicalTemporaryFixture = async (prefix) => {
+  const directory = await realpath(await mkdtemp(path.join(tmpdir(), prefix)));
+  const syncRoot = realpathSync(directory);
+  const realpathInFixture = (candidate) => {
+    const relative = path.relative(syncRoot, realpathSync(candidate));
+    if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+      throw Object.assign(new Error(`ENOENT: ${candidate}`), { code: "ENOENT" });
+    }
+    return path.join(directory, relative);
+  };
+  return { directory, realpathInFixture };
+};
+
 test("classifies ACP prompt refusals without exposing vendor error details", () => {
   expect(promptResultFailure({ stopReason: "end_turn" })).toBeNull();
   expect(promptResultFailure({ stopReason: "end_turn" }, { producedOutput: true })).toBeNull();
@@ -688,16 +701,8 @@ describe("ACP command allow-list", () => {
   });
 
   test("handles Antigravity mode switching, choose with noResolveAliases, restart, no-op install clear, and clear-all through IPC", async () => {
-    const directory = await mkdtemp(path.join(tmpdir(), "edgeever-acp-agy-ipc-"));
+    const { directory, realpathInFixture: onlyTemporaryDirectory } = await canonicalTemporaryFixture("edgeever-acp-agy-ipc-");
     try {
-      const realDirectory = realpathSync(directory);
-      const asyncRealDirectory = await realpath(directory);
-      const onlyTemporaryDirectory = (candidate) => {
-        if (!candidate.startsWith(directory) && !candidate.startsWith(realDirectory) && !candidate.startsWith(asyncRealDirectory)) {
-          throw Object.assign(new Error(`ENOENT: ${candidate}`), { code: "ENOENT" });
-        }
-        return realpathSync(candidate);
-      };
       const localBin = path.join(directory, ".local", "bin");
       await mkdir(localBin, { recursive: true });
       const localAgy = path.join(localBin, "agy");
@@ -772,7 +777,7 @@ describe("ACP command allow-list", () => {
       expect(dialogCalls.at(-1).properties).toEqual(ACP_OPEN_DIALOG_PROPERTIES);
       expect(dialogCalls.at(-1).properties).toContain("noResolveAliases");
       await firstRun.handlers.get("desktop:acp-probe")({ sender }, { id: "antigravity" });
-      expect(spawned.at(-1)).toEqual({ command: realpathSync(customStandalone), args: [] });
+      expect(spawned.at(-1)).toEqual({ command: onlyTemporaryDirectory(customStandalone), args: [] });
 
       // Installing managed adapter when already up to date (updated: false, version: "1.5.2") still clears custom standalone path AND never leaks stale customPath from latestStatus.
       installReturn = { updated: false, version: "1.5.2" };
@@ -793,7 +798,7 @@ describe("ACP command allow-list", () => {
       expect(listedAfterModeSwitch).toMatchObject({ antigravityMode: "cli", state: "not_probed" });
       const cliProbe = await firstRun.handlers.get("desktop:acp-probe")({ sender }, { id: "antigravity" });
       expect(cliProbe.antigravityMode).toBe("cli");
-      expect(spawned.at(-1)).toEqual({ command: realpathSync(localAgy), args: ["acp"] });
+      expect(spawned.at(-1)).toEqual({ command: onlyTemporaryDirectory(localAgy), args: ["acp"] });
 
       // Choose agy symlink targeting versioned binary in CLI mode -> persists across restart and runs with ["acp"].
       nextSelection = agySymlink;
@@ -807,7 +812,7 @@ describe("ACP command allow-list", () => {
 
       const restarted = createRegistration();
       await restarted.handlers.get("desktop:acp-probe")({ sender }, { id: "antigravity" });
-      expect(spawned.at(-1)).toEqual({ command: realpathSync(versionedCli), args: ["acp"] });
+      expect(spawned.at(-1)).toEqual({ command: onlyTemporaryDirectory(versionedCli), args: ["acp"] });
 
       // Clearing custom path clears BOTH standalone and cli custom paths AND resets mode back to default standalone -> uses managed 1.5.2.
       expect(await restarted.handlers.get("desktop:acp-clear-path")({ sender }, "antigravity")).toBe(true);
@@ -823,19 +828,19 @@ describe("ACP command allow-list", () => {
       // Switching back to CLI after clear-all also has no stale CLI custom path -> auto-discovers ~/.local/bin/agy.
       expect(await restarted.handlers.get("desktop:acp-set-mode")({ sender }, "antigravity", "cli")).toBe(true);
       await restarted.handlers.get("desktop:acp-probe")({ sender }, { id: "antigravity" });
-      expect(spawned.at(-1)).toEqual({ command: realpathSync(localAgy), args: ["acp"] });
+      expect(spawned.at(-1)).toEqual({ command: onlyTemporaryDirectory(localAgy), args: ["acp"] });
 
       // Concurrent writes to the path store are serialized without ENOENT or state drift.
       await Promise.all([
-        restarted.store.setPath(realpathSync(customStandalone), "standalone"),
-        restarted.store.setPath(realpathSync(versionedCli), "cli"),
+        restarted.store.setPath(onlyTemporaryDirectory(customStandalone), "standalone"),
+        restarted.store.setPath(onlyTemporaryDirectory(versionedCli), "cli"),
         restarted.store.setMode("cli"),
       ]);
       expect(await restarted.store.getEntry()).toEqual({
         mode: "cli",
-        path: realpathSync(versionedCli),
-        standalonePath: realpathSync(customStandalone),
-        cliPath: realpathSync(versionedCli),
+        path: onlyTemporaryDirectory(versionedCli),
+        standalonePath: onlyTemporaryDirectory(customStandalone),
+        cliPath: onlyTemporaryDirectory(versionedCli),
       });
     } finally {
       await rm(directory, { recursive: true, force: true });
