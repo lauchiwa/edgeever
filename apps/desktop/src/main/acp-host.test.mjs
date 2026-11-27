@@ -691,8 +691,9 @@ describe("ACP command allow-list", () => {
     const directory = await mkdtemp(path.join(tmpdir(), "edgeever-acp-agy-ipc-"));
     try {
       const realDirectory = realpathSync(directory);
+      const asyncRealDirectory = await realpath(directory);
       const onlyTemporaryDirectory = (candidate) => {
-        if (!candidate.startsWith(directory) && !candidate.startsWith(realDirectory)) {
+        if (!candidate.startsWith(directory) && !candidate.startsWith(realDirectory) && !candidate.startsWith(asyncRealDirectory)) {
           throw Object.assign(new Error(`ENOENT: ${candidate}`), { code: "ENOENT" });
         }
         return realpathSync(candidate);
@@ -767,7 +768,7 @@ describe("ACP command allow-list", () => {
 
       // Choose custom standalone path; verify chooser passes noResolveAliases.
       const chosenStandalone = await firstRun.handlers.get("desktop:acp-choose-path")({ sender }, "antigravity");
-      expect(chosenStandalone).toBe(realpathSync(customStandalone));
+      expect(chosenStandalone).toBe(await realpath(customStandalone));
       expect(dialogCalls.at(-1).properties).toEqual(ACP_OPEN_DIALOG_PROPERTIES);
       expect(dialogCalls.at(-1).properties).toContain("noResolveAliases");
       await firstRun.handlers.get("desktop:acp-probe")({ sender }, { id: "antigravity" });
@@ -797,10 +798,10 @@ describe("ACP command allow-list", () => {
       // Choose agy symlink targeting versioned binary in CLI mode -> persists across restart and runs with ["acp"].
       nextSelection = agySymlink;
       const chosenCli = await firstRun.handlers.get("desktop:acp-choose-path")({ sender }, "antigravity");
-      expect(chosenCli).toBe(realpathSync(versionedCli));
+      expect(chosenCli).toBe(await realpath(versionedCli));
       expect(JSON.parse(await readFile(storeFile, "utf8"))).toEqual({
-        antigravity: realpathSync(customStandalone),
-        antigravityCli: realpathSync(versionedCli),
+        antigravity: await realpath(customStandalone),
+        antigravityCli: await realpath(versionedCli),
         antigravityMode: "cli",
       });
 
